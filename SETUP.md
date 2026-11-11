@@ -1,123 +1,138 @@
-# GhostRing setup
+# GhostRing
 
-**Just want to try it?** Use the hosted demo linked in the submission. Or run it locally with no keys: install the requirements, copy `.env.example` to `.env`, set `LLM_MODE=mock`, and start the app (see below). Live PayPal refunds need sandbox credentials; judges get any test credentials from the Devpost testing instructions, never from this repository.
+Fraud triage for small PayPal sellers. GhostRing ranks incoming payments from as few as five confirmed frauds, attaches the closest confirmed cases to each flag as evidence, and refunds through PayPal only after code and a person have both signed off.
 
-## Run it locally
+Built for the PayPal AI Hackathon. The live demo and demo video are linked in the submission. [Setup](SETUP.md) · MIT licensed
 
-```bash
+## At a glance
+
+A small seller holds a handful of confirmed frauds, not the thousands of labelled cases a conventional classifier needs, and a bare risk score gives them nothing to act on or defend. GhostRing starts from the cases the seller already trusts. On the public ULB credit-card benchmark it reaches 0.81 to 0.83 PR-AUC from five to 25 confirmed frauds, with no training step. That is within about two points of a Random Forest, which is slightly more accurate and much faster (see [Results](#results)). Gemini drafts the explanation and proposes an action; plain code verifies the text and decides; a person confirms; PayPal confirms that the payment is refundable. On the bundled demo sample, 10 of its top 10 flags were real fraud, scored against labels the system never saw (a small sample; the benchmark above is the main accuracy evidence).
+
+## PayPal at a glance
+
+- **PayPal holds the payments.** The demo payments are real PayPal sandbox orders, created and captured through the Orders API.
+- **PayPal confirms before money moves.** The app reads the capture back and blocks the refund if PayPal reports any status other than `COMPLETED`, or a different amount.
+- **PayPal issues the refund.** The app calls the refund endpoint under an idempotency key, so a repeated click cannot refund twice.
+- **You can see it in the app.** Each linked payment shows a *PayPal record* box, the refund ID, a "Refunded via PayPal" total and a PayPal flow card.
+- **Proven end to end.** Four sandbox payments were created, captured and refunded through the app, and PayPal shows each as `REFUNDED` ($425.07 in total; see [Verified PayPal sandbox results](#verified-paypal-sandbox-results)).
+- **Sandbox only.** Every call targets the PayPal sandbox with test money.
+
+## Testing it (for judges)
+
+Every route is free and needs no login.
+
+1. **Hosted demo.** Open the live demo linked in the submission. Scoring, evidence, the Gemini explanation, the verifier verdict and the PayPal record work on every flagged row. The four linked sandbox payments were refunded during development (see [Verified PayPal sandbox results](#verified-paypal-sandbox-results)), so the live page shows them as *Refunded* and no refund button is left to click. To run a live refund yourself, seed fresh payments with [SETUP.md](SETUP.md).
+2. **Run it with no keys.** Run `pip install -r requirements.txt` and `cp .env.example .env`, set `LLM_MODE=mock`, then run `python -m uvicorn app:app --reload`. You get the scoring, evidence, verifier and review queue on the bundled sample. Sending a refund needs PayPal sandbox credentials (route 3).
+3. **Run it with live PayPal refunds.** Follow [SETUP.md](SETUP.md). Any test credentials a judge needs are supplied in the Devpost testing instructions, never in this repository.
+
+## Try it
+
+Open the live demo; the first request can take up to a minute while the free instance wakes. The review queue lists the fifteen highest-risk payments. Rows tagged *PayPal payment linked* are backed by real sandbox payments; in the hosted demo they have already been refunded and show as *Refunded*. The rest carry a recommendation only.
+
+Open a linked row with **Explain**. You get the evidence, the AI's explanation, the verifier's verdict, and a *PayPal record* showing the payment's status and amount. If the verified decision is a refund and a PayPal payment is attached, confirm it to send a sandbox refund. Rows with no attached payment show a *Review only* note under the recommended action: the policy would refund them, but there is nothing in PayPal to refund. A payment can be fully refunded once, and the page shows how many remain. All money is sandbox test money. If no backend answers and the page is opened as a local file or with `?demo` in the address, it falls back to a clearly labelled demo mode with simulated data and no PayPal calls. The live site always uses the real backend.
+
+## PayPal integration
+
+**The flow:** customer pays → payment captured in PayPal → GhostRing scores and explains → a person confirms → PayPal verifies the capture → PayPal issues the refund.
+
+PayPal is where a flag becomes money back, and it is the system of record before any money moves. Every call targets the sandbox, and the client refuses to start against any other host.
+
+| PayPal REST call | Used by | Purpose |
+| --- | --- | --- |
+| `POST /v1/oauth2/token` | app, seeding script | Authenticate |
+| `GET /v2/payments/captures/{id}` | app | Verify status and amount before a refund; at startup, learn which payments PayPal already shows as refunded |
+| `POST /v2/payments/captures/{id}/refund` | app | Issue the refund under a `PayPal-Request-Id` idempotency key |
+| `POST /v2/checkout/orders` | seeding script | Create the demo payments |
+| `GET /v2/checkout/orders/{id}` | seeding script | Confirm the buyer has approved an order |
+| `POST /v2/checkout/orders/{id}/capture` | seeding script | Capture approved orders so they can be refunded |
+
+### Verified PayPal sandbox results
+
+Four demo payments were created, approved by a sandbox buyer, captured and then refunded through the app. For each one, PayPal's own record of the capture now reads `REFUNDED`, and the app holds a matching refund receipt. All amounts are USD test money.
+
+| Transaction | Amount | PayPal capture ID | PayPal refund ID | Refund status |
+| --- | --- | --- | --- | --- |
+| TX-0135 | $77.89 | `13H31123AR991810T` | `8J376810CS489174J` | COMPLETED |
+| TX-0485 | $24.90 | `6AA268242U8174507` | `6LM96918AD5509200` | COMPLETED |
+| TX-0081 | $83.38 | `02C52963EP228835C` | `8BK82312SS343845M` | COMPLETED |
+| TX-0700 | $238.90 | `3LV68253J93115320` | `0N516169PF7820533` | COMPLETED |
+
+![Review queue in the hosted app: TX-0135, TX-0485, TX-0081 and TX-0700 are tagged "PayPal payment linked" and "Refunded"; other rows are "Review only".](docs/review-queue.png)
+
+*The review queue after the four refunds: each linked payment shows as Refunded, and rows with no PayPal payment attached are Review only.*
+
+Total refunded: $425.07. Each refund went through the app's refund route, after a person confirmed it: the app first read the capture back from PayPal (`COMPLETED`, matching amount), then called the refund endpoint. A refunded payment cannot be refunded again, so these four are now spent.
+
+We call the REST API directly rather than through the Agent Toolkit or MCP server, which keeps the step that moves money deterministic and auditable. Demo payments are created and captured with `seed_sandbox.py`. PayPal requires a buyer to approve each order, so that step is manual.
+
+## How it works
+
+**Score.** Graph Ghost is semi-supervised label propagation (label spreading; Zhou et al., 2004) on a k-nearest-neighbour similarity graph of payments (k = 10, cosine distance). The seller's confirmed frauds and known-good payments seed the graph, their labels diffuse along similarity edges, and each unlabelled payment inherits a score from its neighbourhood. Nothing is trained. The output is a risk index from 0 to 100 that ranks new payments against one another.
+
+**Evidence.** Each flag lists the three most similar confirmed frauds, by cosine similarity, with their amounts and similarity scores, so the seller can see what the ranking rests on.
+
+**Explain.** Gemini receives only the facts the scorer produced and returns a short explanation with a proposed action: `refund`, `review` or `approve`. The merchant policy is explicit. Refund only when the risk index is at least 60 and the nearest confirmed fraud has a similarity of at least 0.70.
+
+**Verify.** Model output is untrusted input. The explanation is accepted only if every number and transaction ID in it appears in the scorer's facts; otherwise a template replaces it. Code, not the model, then fixes the action, downgrading a proposed refund to `review` unless both thresholds hold. The check fails closed: with no similarity evidence, there is no refund.
+
+**Refund.** After a person confirms, the app reads the capture back from PayPal and blocks the refund if PayPal reports any status other than `COMPLETED`, or a different amount. If that lookup itself fails, PayPal still validates the refund request. It then issues the refund under an idempotency key, so a repeated click cannot refund twice.
+
+## Results
+
+Given 5, 10 or 25 confirmed frauds and 300 known-good payments, Graph Ghost reaches 0.81 to 0.83 PR-AUC on the public ULB credit-card dataset.
+
+*Protocol.* 30,492 transactions: all 492 frauds plus 30,000 legitimate ones. Each method sees only the stated labels and is scored on the transactions it was not given. PR-AUC is the area under the precision-recall curve (1.0 is perfect). Figures are mean ± standard deviation over five seeds. Reproduce with `python evaluate.py --csv data/creditcard.csv`; the raw output is in `results.json`.
+
+| Known frauds | Graph Ghost | Logistic Regression | Random Forest |
+| --- | --- | --- | --- |
+| 5 | 0.811 ± 0.019 | 0.734 ± 0.206 | 0.832 ± 0.015 |
+| 10 | 0.820 ± 0.023 | 0.744 ± 0.065 | 0.842 ± 0.012 |
+| 25 | 0.827 ± 0.026 | 0.792 ± 0.030 | 0.853 ± 0.014 |
+
+Graph Ghost trails Random Forest by roughly two points at every label budget and is the slower method (roughly 15 to 30 seconds against 0.5 to 2 on 30,000 rows). It is markedly more stable than logistic regression when labels are scarce (a standard deviation of 0.019 against 0.206 at five labels). We claim comparable accuracy without training, not superiority. The contribution is per-flag evidence and a verified path to a refund.
+
+Two caveats apply. The sample is enriched: about 1.6% fraud, against roughly 0.17% in the source data, which flatters PR-AUC relative to production. And the method is transductive, scoring a batch with the unlabelled payments inside the graph, whereas the baselines are inductive and see only their labels.
+
+On the sample bundled with the repository (4% fraud), 10 of the top 10 flags and 19 of the top 20 were fraudulent, measured against labels the system never saw. It is a single small sample, so treat the table as the accuracy evidence.
+
+## Safety design
+
+The model proposes; code decides. Invented numbers or identifiers are rejected, and a template explanation covers any model failure. A refund requires the code's approval, PayPal's confirmation that the payment is refundable, and a person's click. The risk index is a ranking signal, not proof of fraud, and the interface says so.
+
+`python verifier.py` runs four tests: text that uses only known numbers is accepted; text with an invented amount and transaction ID is rejected; a refund is downgraded to `review` unless both thresholds hold; an invalid action is replaced.
+
+## Limits
+
+- **No ring detection.** The public data is anonymised, with no accounts, devices or emails, so the graph links transactions by feature similarity and GhostRing makes no fraud-ring claim.
+- **Relative risk index.** It is scaled so the top-ranked payment in a batch is always 100. It ranks payments against one another and is not an absolute probability, which is why the refund rule also demands a close confirmed-fraud match.
+- **Narrow verification.** The verifier checks numbers and transaction IDs, not qualitative statements.
+- **Spent demo payments.** There is no login, and each sandbox payment can be fully refunded only once. The hosted demo's linked payments have all been used, so it shows them as refunded. Fresh payments can be seeded with `seed_sandbox.py` (see [SETUP.md](SETUP.md)).
+- **Single dataset.** Results come from one public dataset and have not been tested on a real merchant.
+
+## Built during the hackathon
+
+This section explains how the project was significantly updated during the Submission Period (1 October to 12 November 2026).
+
+Before the hackathon there was a research prototype of kNN-graph label propagation, tested on small textbook datasets (Iris and Wine). Everything specific to this project was built for the event: fraud scoring and evidence at scale, the baseline comparison, the Gemini explainer and its merchant policy, the verifier and its tests, the PayPal sandbox integration, the web app and the deployment setup.
+
+## Tools
+
+Gemini API: writes the explanation and proposes the action (model set by `GEMINI_MODEL`; built and tested with `gemini-3.5-flash-lite`). PayPal REST API (sandbox): payments, status checks and refunds. Graph Ghost: our own method, implemented with scikit-learn and SciPy. Backend: FastAPI. Front end: plain HTML and JavaScript. Hosting: Render (one of the hackathon's sponsor tools). Fonts: Dela Gothic One and Zen Kaku Gothic New, loaded from Google Fonts (SIL Open Font License).
+
+## Run it yourself
+
+```
 pip install -r requirements.txt
-python prepare_demo_data.py --csv data/creditcard.csv   # builds data/demo_tx.csv
-cp .env.example .env                                    # then fill in keys (on Windows: copy)
-python seed_sandbox.py create 10                        # each payment can be refunded once, so seed enough for testers
-python seed_sandbox.py capture
+cp .env.example .env
 python -m uvicorn app:app --reload
 ```
 
-Open <http://127.0.0.1:8000>. With `LLM_MODE=mock` the app runs with no API keys.
+With `LLM_MODE=mock` the app runs without API keys, using template explanations. Live refunds need PayPal sandbox credentials and seeded payments. The demo sample ships in `data/demo_tx.csv`. To rebuild it or reproduce the benchmark, download `creditcard.csv` (Kaggle: mlg-ulb/creditcardfraud) into `data/`. [SETUP.md](SETUP.md) has the full steps, settings and a troubleshooting table.
 
-> **Windows:** create `.env` in Notepad and make sure it is not saved as `.env.txt`.
+## Next
 
-`creditcard.csv` comes from the [Kaggle Credit Card Fraud dataset](https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud) (free Kaggle login required).
+The seller currently supplies confirmed frauds by hand. The next step is to ingest them from PayPal's Disputes API and webhooks, so each newly confirmed fraud sharpens the next round of flags. Not built.
 
-### `.env` settings
+## License and data
 
-Each label appears once, with no quotes or spaces. Never commit this file.
-
-```env
-LLM_MODE=gemini                  # or "mock" for no API key
-GEMINI_API_KEY=...
-GEMINI_MODEL=...                 # a model your key lists, e.g. gemini-flash-latest
-PAYPAL_CLIENT_ID=...
-PAYPAL_SECRET=...
-PAYPAL_BASE=https://api-m.sandbox.paypal.com
-PAYPAL_CURRENCY=...              # a currency your sandbox accounts accept (e.g. USD or INR)
-REFUND_MIN_RISK=60
-REFUND_MIN_SIM=0.70
-```
-
-### List the models your Gemini key can use
-
-```bash
-python -c "from dotenv import load_dotenv; load_dotenv(); import os,requests; r=requests.get('https://generativelanguage.googleapis.com/v1beta/models', headers={'x-goog-api-key':os.getenv('GEMINI_API_KEY')}, params={'pageSize':200}); print(r.status_code); [print(m['name']) for m in r.json().get('models',[]) if 'generateContent' in m.get('supportedGenerationMethods',[])]"
-```
-
-## Seed live sandbox payments
-
-A refund needs a captured payment, and a capture needs a buyer to approve the order, so this step is manual.
-
-1. Run `python seed_sandbox.py create 5`. It deletes any old `data/captures.json` and `data/refunds.json`, creates sandbox orders for the top flagged rows that meet the refund rules, and prints approval links.
-2. Open each link in a private window and approve it as a sandbox **Personal (buyer)** account. The seller and the buyer must be able to transact in the configured currency. Use only the links from the latest `create` run.
-3. Run `python seed_sandbox.py capture`. It captures the approved orders and writes `data/captures.json`. It is safe to run again if you approved some links late.
-4. Restart the app.
-
-> Each linked payment can be fully refunded only once. If you plan to deploy these payments, do not click refund on them while testing locally. Seed fresh payments right before you deploy.
-
-## Sandbox setup notes
-
-- Use sandbox keys (the **Sandbox** toggle in the PayPal developer dashboard), not Live keys.
-- The sandbox Business account, the Personal buyer account, and `PAYPAL_CURRENCY` must be compatible. A **US Business + US Personal + USD** setup works. India-based sandbox accounts reject USD orders ("This seller doesn't accept payments in your currency").
-- Orders are locked to the currency they were created in. After changing `PAYPAL_CURRENCY`, create new orders.
-
-## Deploy on Render
-
-1. Make the repository **public** and add a `LICENSE` file (MIT) at its root so GitHub shows the licence in the About box. Push it to GitHub, including `data/demo_tx.csv` and `data/captures.json`. Do **not** commit `.env` or `data/refunds.json`: check that `.gitignore` lists both. Make sure `requirements.txt`, `render.yaml`, `LICENSE`, `.env.example` and `static/index.html` are included.
-2. In Render, create a **Web Service** from the repository (the included `render.yaml` sets the build and start commands and the Python version).
-3. In the Render dashboard, set `GEMINI_API_KEY`, `GEMINI_MODEL`, `PAYPAL_CLIENT_ID`, `PAYPAL_SECRET` and `PAYPAL_CURRENCY`, using the same values as your working local `.env`. A wrong `PAYPAL_CURRENCY` makes refunds fail. The free instance sleeps when idle, so the first request can take up to a minute. Keep the demo running, with fresh seeded payments, through the end of judging (15 December 2026).
-4. Open the live link in a private window and check that the flags load, an explanation appears, and the "PayPal record" box shows the payment as `COMPLETED`.
-
-## Troubleshooting
-
-| Symptom | Likely cause |
-|---|---|
-| Page is blank | `static/index.html` is empty or missing |
-| `Directory 'static' does not exist` | The `static` folder is not next to `app.py` |
-| Gemini 404 | The model name is not on your key's list |
-| Gemini 400 `unexpected model name format` | A duplicated label or stray character in `.env` |
-| Gemini timeout | Slow model or network; try a `-lite` model |
-| PayPal `ORDER_NOT_APPROVED` or "buyer has not approved yet" | Capture ran before every link was approved; approve the rest and run `capture` again |
-| "seller doesn't accept payments in your currency" | Currency not supported by the seller and buyer sandbox accounts; set `PAYPAL_CURRENCY` |
-| Every row says "Review only" | `/api/flags` is missing `similar_confirmed_frauds`, or risk and similarity are below the refund thresholds |
-| Page shows "Demo mode" with simulated data | No backend answered; start the app and open <http://127.0.0.1:8000> instead of the file |
-| Decision is `review` on a high-risk row | Closest confirmed-fraud similarity is below `REFUND_MIN_SIM` |
-
-## Tests
-
-```bash
-python test_verifier.py
-```
-
-Runs the safety tests (no keys or data needed).
-
-## Evaluation
-
-```bash
-python evaluate.py --csv data/creditcard.csv
-```
-
-Compares Graph Ghost with Logistic Regression and Random Forest over several seeds and writes `results.json`.
-
-## Files
-
-| File | Purpose |
-|---|---|
-| `graph_ghost.py` | kNN graph and label spreading (the scorer) |
-| `evaluate.py` | Graph Ghost vs Logistic Regression and Random Forest |
-| `prepare_demo_data.py` | Builds the small demo sample from the public dataset |
-| `core.py` | Scoring pipeline, evidence, demo backtest |
-| `llm.py` | Gemini explainer (and offline mock mode) |
-| `verifier.py` | Code checks on AI output and the final-action rule |
-| `test_verifier.py` | Safety tests |
-| `paypal_client.py` | PayPal sandbox REST client |
-| `seed_sandbox.py` | Creates and captures sandbox payments for the demo |
-| `app.py`, `static/index.html` | API and web page |
-| `render.yaml` | Render deployment config |
-
-## API
-
-| Method | Endpoint |
-|---|---|
-| GET | `/api/flags` |
-| GET | `/api/backtest` |
-| POST | `/api/explain/{tx_id}` |
-| POST | `/api/refund/{tx_id}` |
-| GET | `/api/health` |
+Code: MIT (see the LICENSE file in the repository root). The demo data is a sample of the Credit Card Fraud Detection dataset from the ULB Machine Learning Group (Kaggle: mlg-ulb/creditcardfraud), which keeps its own license; see its Kaggle page. Credit: Andrea Dal Pozzolo, Olivier Caelen, Reid A. Johnson and Gianluca Bontempi, "Calibrating Probability with Undersampling for Unbalanced Classification", IEEE CIDM, 2015.

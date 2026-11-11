@@ -4,7 +4,9 @@
 
 GhostRing helps small PayPal sellers find fraudulent payments using as few as five confirmed fraud cases. It ranks incoming payments, shows the closest confirmed frauds as evidence for every flag, and sends a refund through PayPal only after both code and a person have approved it.
 
-Built for the PayPal AI Hackathon. The live demo and demo video are linked in the submission. [Setup](SETUP.md) · MIT licensed
+**[▶ Live demo](LIVE_DEMO_URL)** · **[Demo video](DEMO_VIDEO_URL)** · [Setup](SETUP.md) · MIT licensed
+
+Built for the PayPal AI Hackathon.
 
 ## The problem
 
@@ -43,7 +45,7 @@ Open the live demo. The first request can take up to a minute while the free ins
 
 Open a linked row with **Explain** and you will see the evidence, the AI's explanation, the verifier's verdict, and a *PayPal record* showing the payment's status and amount. If the verified decision is a refund and a PayPal payment is attached, confirm it to send a sandbox refund. Rows with no attached payment show a *Review only* note under the recommended action: the policy would refund them, but there is nothing in PayPal to refund. A payment can be fully refunded once, and the page shows how many remain. All money is sandbox test money.
 
-If no backend answers, or the page is opened as a local file or with `?demo` in the address, it falls back to a clearly labelled demo mode with simulated data and no PayPal calls. The live site always uses the real backend.
+If no backend answers, or the page is opened as a local file, it falls back to a clearly labelled demo mode with simulated data and no PayPal calls. The live site always uses the real backend.
 
 ## PayPal integration
 

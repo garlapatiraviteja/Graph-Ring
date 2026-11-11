@@ -129,8 +129,6 @@ The model proposes and code decides. Invented numbers or identifiers are rejecte
 - **No ring detection.** The public data is anonymised, with no accounts, devices or emails, so the graph links transactions by feature similarity and GhostRing makes no fraud-ring claim.
 - **Relative risk index.** The index is scaled so the top-ranked payment in a batch is always 100. It ranks payments against one another and is not an absolute probability, which is why the refund rule also demands a close confirmed-fraud match.
 - **Narrow verification.** The verifier checks numbers and transaction IDs, not qualitative statements.
-- **Spent demo payments.** There is no login, and each sandbox payment can be fully refunded only once. The linked payments seeded during development have all been used, so the app shows them as refunded. Fresh payments can be seeded with `seed_sandbox.py` (see [SETUP.md](SETUP.md)).
-- **Single dataset.** Results come from one public dataset and have not been tested on a real merchant.
 
 ## Built during the hackathon
 
@@ -162,6 +160,4 @@ With `LLM_MODE=mock`, the app runs without API keys and uses template explanatio
 
 Today the seller supplies confirmed frauds by hand. The next step is to ingest them from PayPal's Disputes API and webhooks, so that each newly confirmed fraud sharpens the next round of flags. This is not yet built.
 
-## License and data
 
-Code: MIT (see the LICENSE file in the repository root). The demo data is a sample of the Credit Card Fraud Detection dataset from the ULB Machine Learning Group (Kaggle: mlg-ulb/creditcardfraud), which keeps its own license; see its Kaggle page. Credit: Andrea Dal Pozzolo, Olivier Caelen, Reid A. Johnson and Gianluca Bontempi, "Calibrating Probability with Undersampling for Unbalanced Classification", IEEE CIDM, 2015.

@@ -57,7 +57,7 @@ Four demo payments were created, approved by a sandbox buyer, captured and then 
 | TX-0081 | $83.38 | `02C52963EP228835C` | `8BK82312SS343845M` | COMPLETED |
 | TX-0700 | $238.90 | `3LV68253J93115320` | `0N516169PF7820533` | COMPLETED |
 
-![Review queue in the hosted app: TX-0135, TX-0485, TX-0081 and TX-0700 are tagged "PayPal payment linked" and "Refunded"; other rows are "Review only".](docs/review-queue.png)
+![Review queue in the hosted app: TX-0135, TX-0485, TX-0081 and TX-0700 are tagged "PayPal payment linked" and "Refunded"; other rows are "Review only".](review-queue.png)
 
 *The review queue after the four refunds: each linked payment shows as Refunded, and rows with no PayPal payment attached are Review only.*
 

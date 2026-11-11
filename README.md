@@ -6,7 +6,7 @@ GhostRing helps small PayPal sellers find fraudulent payments using as few as fi
 
 **[▶ Live demo](LIVE_DEMO_URL)** · **[Demo video](DEMO_VIDEO_URL)** · [Setup](SETUP.md) · MIT licensed
 
-Built for the PayPal AI Hackathon.
+
 
 ## The problem
 

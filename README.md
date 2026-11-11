@@ -14,21 +14,22 @@ A small seller holds a handful of confirmed frauds, not the thousands of labelle
 - **PayPal confirms before money moves.** The app reads the capture back and blocks the refund if PayPal reports any status other than `COMPLETED`, or a different amount.
 - **PayPal issues the refund.** The app calls the refund endpoint under an idempotency key, so a repeated click cannot refund twice.
 - **You can see it in the app.** Each linked payment shows a *PayPal record* box, the refund ID, a "Refunded via PayPal" total and a PayPal flow card.
+- **Proven end to end.** Four sandbox payments were created, captured and refunded through the app, and PayPal shows each as `REFUNDED` ($425.07 in total; see [Verified PayPal sandbox results](#verified-paypal-sandbox-results)).
 - **Sandbox only.** Every call targets the PayPal sandbox with test money.
 
 ## Testing it (for judges)
 
 Every route is free and needs no login.
 
-1. **Hosted demo.** Open the live demo linked in the submission. Rows tagged *PayPal payment linked* are real sandbox payments, each refundable once.
+1. **Hosted demo.** Open the live demo linked in the submission. Scoring, evidence, the Gemini explanation, the verifier verdict and the PayPal record work on every flagged row. The four linked sandbox payments were refunded during development (see [Verified PayPal sandbox results](#verified-paypal-sandbox-results)), so the live page shows them as *Refunded* and no refund button is left to click. To run a live refund yourself, seed fresh payments with [SETUP.md](SETUP.md).
 2. **Run it with no keys.** Run `pip install -r requirements.txt` and `cp .env.example .env`, set `LLM_MODE=mock`, then run `python -m uvicorn app:app --reload`. You get the scoring, evidence, verifier and review queue on the bundled sample. Sending a refund needs PayPal sandbox credentials (route 3).
 3. **Run it with live PayPal refunds.** Follow [SETUP.md](SETUP.md). Any test credentials a judge needs are supplied in the Devpost testing instructions, never in this repository.
 
 ## Try it
 
-Open the live demo; the first request can take up to a minute while the free instance wakes. The review queue lists the fifteen highest-risk payments. Rows tagged *PayPal payment linked* are backed by real sandbox payments and can be refunded. The rest carry a recommendation only.
+Open the live demo; the first request can take up to a minute while the free instance wakes. The review queue lists the fifteen highest-risk payments. Rows tagged *PayPal payment linked* are backed by real sandbox payments; in the hosted demo they have already been refunded and show as *Refunded*. The rest carry a recommendation only.
 
-Open a linked row with **Explain**. You get the evidence, the AI's explanation, the verifier's verdict, and a *PayPal record* showing the payment's status and amount. If the verified decision is a refund, confirm it to send a sandbox refund. A payment can be fully refunded once, and the page shows how many remain. All money is sandbox test money. If no backend answers and the page is opened as a local file or with `?demo` in the address, it falls back to a clearly labelled demo mode with simulated data and no PayPal calls. The live site always uses the real backend.
+Open a linked row with **Explain**. You get the evidence, the AI's explanation, the verifier's verdict, and a *PayPal record* showing the payment's status and amount. If the verified decision is a refund and a PayPal payment is attached, confirm it to send a sandbox refund. Rows with no attached payment show a *Review only* note under the recommended action: the policy would refund them, but there is nothing in PayPal to refund. A payment can be fully refunded once, and the page shows how many remain. All money is sandbox test money. If no backend answers and the page is opened as a local file or with `?demo` in the address, it falls back to a clearly labelled demo mode with simulated data and no PayPal calls. The live site always uses the real backend.
 
 ## PayPal integration
 
@@ -37,13 +38,30 @@ Open a linked row with **Explain**. You get the evidence, the AI's explanation, 
 PayPal is where a flag becomes money back, and it is the system of record before any money moves. Every call targets the sandbox, and the client refuses to start against any other host.
 
 | PayPal REST call | Used by | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `POST /v1/oauth2/token` | app, seeding script | Authenticate |
 | `GET /v2/payments/captures/{id}` | app | Verify status and amount before a refund; at startup, learn which payments PayPal already shows as refunded |
 | `POST /v2/payments/captures/{id}/refund` | app | Issue the refund under a `PayPal-Request-Id` idempotency key |
 | `POST /v2/checkout/orders` | seeding script | Create the demo payments |
 | `GET /v2/checkout/orders/{id}` | seeding script | Confirm the buyer has approved an order |
 | `POST /v2/checkout/orders/{id}/capture` | seeding script | Capture approved orders so they can be refunded |
+
+### Verified PayPal sandbox results
+
+Four demo payments were created, approved by a sandbox buyer, captured and then refunded through the app. For each one, PayPal's own record of the capture now reads `REFUNDED`, and the app holds a matching refund receipt. All amounts are USD test money.
+
+| Transaction | Amount | PayPal capture ID | PayPal refund ID | Refund status |
+| --- | --- | --- | --- | --- |
+| TX-0135 | $77.89 | `13H31123AR991810T` | `8J376810CS489174J` | COMPLETED |
+| TX-0485 | $24.90 | `6AA268242U8174507` | `6LM96918AD5509200` | COMPLETED |
+| TX-0081 | $83.38 | `02C52963EP228835C` | `8BK82312SS343845M` | COMPLETED |
+| TX-0700 | $238.90 | `3LV68253J93115320` | `0N516169PF7820533` | COMPLETED |
+
+![Review queue in the hosted app: TX-0135, TX-0485, TX-0081 and TX-0700 are tagged "PayPal payment linked" and "Refunded"; other rows are "Review only".](docs/review-queue.png)
+
+*The review queue after the four refunds: each linked payment shows as Refunded, and rows with no PayPal payment attached are Review only.*
+
+Total refunded: $425.07. Each refund went through the app's refund route, after a person confirmed it: the app first read the capture back from PayPal (`COMPLETED`, matching amount), then called the refund endpoint. A refunded payment cannot be refunded again, so these four are now spent.
 
 We call the REST API directly rather than through the Agent Toolkit or MCP server, which keeps the step that moves money deterministic and auditable. Demo payments are created and captured with `seed_sandbox.py`. PayPal requires a buyer to approve each order, so that step is manual.
 
@@ -66,12 +84,12 @@ Given 5, 10 or 25 confirmed frauds and 300 known-good payments, Graph Ghost reac
 *Protocol.* 30,492 transactions: all 492 frauds plus 30,000 legitimate ones. Each method sees only the stated labels and is scored on the transactions it was not given. PR-AUC is the area under the precision-recall curve (1.0 is perfect). Figures are mean ± standard deviation over five seeds. Reproduce with `python evaluate.py --csv data/creditcard.csv`; the raw output is in `results.json`.
 
 | Known frauds | Graph Ghost | Logistic Regression | Random Forest |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 5 | 0.811 ± 0.019 | 0.734 ± 0.206 | 0.832 ± 0.015 |
 | 10 | 0.820 ± 0.023 | 0.744 ± 0.065 | 0.842 ± 0.012 |
 | 25 | 0.827 ± 0.026 | 0.792 ± 0.030 | 0.853 ± 0.014 |
 
-Graph Ghost trails Random Forest by roughly two points at every label budget and is the slower method (20 to 40 seconds against 1 to 2 on 30,000 rows). It is markedly more stable than logistic regression when labels are scarce (a standard deviation of 0.019 against 0.206 at five labels). We claim comparable accuracy without training, not superiority. The contribution is per-flag evidence and a verified path to a refund.
+Graph Ghost trails Random Forest by roughly two points at every label budget and is the slower method (roughly 15 to 30 seconds against 0.5 to 2 on 30,000 rows). It is markedly more stable than logistic regression when labels are scarce (a standard deviation of 0.019 against 0.206 at five labels). We claim comparable accuracy without training, not superiority. The contribution is per-flag evidence and a verified path to a refund.
 
 Two caveats apply. The sample is enriched: about 1.6% fraud, against roughly 0.17% in the source data, which flatters PR-AUC relative to production. And the method is transductive, scoring a batch with the unlabelled payments inside the graph, whereas the baselines are inductive and see only their labels.
 
@@ -81,14 +99,14 @@ On the sample bundled with the repository (4% fraud), 10 of the top 10 flags and
 
 The model proposes; code decides. Invented numbers or identifiers are rejected, and a template explanation covers any model failure. A refund requires the code's approval, PayPal's confirmation that the payment is refundable, and a person's click. The risk index is a ranking signal, not proof of fraud, and the interface says so.
 
-`python test_verifier.py` runs four tests: text that uses only known numbers is accepted; text with an invented amount and transaction ID is rejected; a refund is downgraded to `review` unless both thresholds hold; an invalid action is replaced.
+`python verifier.py` runs four tests: text that uses only known numbers is accepted; text with an invented amount and transaction ID is rejected; a refund is downgraded to `review` unless both thresholds hold; an invalid action is replaced.
 
 ## Limits
 
 - **No ring detection.** The public data is anonymised, with no accounts, devices or emails, so the graph links transactions by feature similarity and GhostRing makes no fraud-ring claim.
 - **Relative risk index.** It is scaled so the top-ranked payment in a batch is always 100. It ranks payments against one another and is not an absolute probability, which is why the refund rule also demands a close confirmed-fraud match.
 - **Narrow verification.** The verifier checks numbers and transaction IDs, not qualitative statements.
-- **Open demo.** There is no login, so anyone can use the refund button on the few sandbox payments, once each.
+- **Spent demo payments.** There is no login, and each sandbox payment can be fully refunded only once. The hosted demo's linked payments have all been used, so it shows them as refunded. Fresh payments can be seeded with `seed_sandbox.py` (see [SETUP.md](SETUP.md)).
 - **Single dataset.** Results come from one public dataset and have not been tested on a real merchant.
 
 ## Built during the hackathon

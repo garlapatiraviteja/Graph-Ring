@@ -4,7 +4,7 @@
 
 GhostRing helps small PayPal sellers find fraudulent payments using as few as five confirmed fraud cases. It ranks incoming payments, shows the closest confirmed frauds as evidence for every flag, and sends a refund through PayPal only after both code and a person have approved it.
 
-**[▶ Demo video](DEMO_VIDEO_URL)** · **[Presentation](PRESENTATION_URL)** · [Setup](SETUP.md) · MIT licensed
+**[▶ Demo video](DEMO_VIDEO_URL)**  · **[Website preview](https://garlapatiraviteja.github.io/Graph-Ring/?demo)** · [Setup](SETUP.md) · MIT licensed
 
 Built for the PayPal AI Hackathon.
 
@@ -37,8 +37,9 @@ Every route is free and needs no login.
 
 1. **Demo video.** Watch the demo video linked at the top of this page. The four linked sandbox payments were refunded during development (see [Verified PayPal sandbox results](#verified-paypal-sandbox-results)), so the app shows them as *Refunded* and no refund button is left to click. To run a live refund yourself, seed fresh payments with [SETUP.md](SETUP.md).
 2. **Presentation.** Read the presentation linked at the top of this page for an overview of the project.
-3. **Run it with no keys.** Run `pip install -r requirements.txt` and `cp .env.example .env`, set `LLM_MODE=mock`, then start the app with `python -m uvicorn app:app --reload`. You get the scoring, evidence, verifier and review queue on the bundled sample. Sending a refund needs PayPal sandbox credentials (route 4).
-4. **Run it with live PayPal refunds.** Follow [SETUP.md](SETUP.md). Any test credentials a judge needs are supplied in the Devpost testing instructions and never appear in this repository.
+3. **Website preview.** Open the [website preview](https://garlapatiraviteja.github.io/Graph-Ring/?demo) to see the interface in your browser. GitHub Pages serves only the front end, so there is no backend behind it and the page shows clearly labelled simulated data, with no PayPal calls. Run the server (routes 4 and 5) to see real scoring and PayPal refunds.
+4. **Run it with no keys.** Run `pip install -r requirements.txt` and `cp .env.example .env`, set `LLM_MODE=mock`, then start the app with `python -m uvicorn app:app --reload`. You get the scoring, evidence, verifier and review queue on the bundled sample. Sending a refund needs PayPal sandbox credentials (route 5).
+5. **Run it with live PayPal refunds.** Follow [SETUP.md](SETUP.md). Any test credentials a judge needs are supplied in the Devpost testing instructions and never appear in this repository.
 
 ## Try it
 

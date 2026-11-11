@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GhostRing – fraud flags for small PayPal sellers</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#14181f; --mute:#5b6572; --line:#e2e6eb; --accent:#0b5fff; --bad:#c62828; --ok:#1b7f3b; --warn:#a15c00; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1319; --card:#171d26; --ink:#eef1f5; --mute:#9aa6b5; --line:#2a3340; --accent:#6ea0ff; --bad:#ff7b7b; --ok:#5fd18a; --warn:#f0b35a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  main { max-width:900px; margin:0 auto; padding:20px 16px 60px; }
+  h1 { font-size:22px; margin:8px 0 4px; }
+  .sub { color:var(--ink); margin:0 0 12px; font-size:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin:12px 0; }
+  .row { display:flex; gap:12px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+  .pill { font-size:12px; padding:2px 8px; border-radius:99px; border:1px solid var(--line); color:var(--mute); }
+  .pp { border-color:var(--accent); color:var(--accent); font-weight:600; }
+  .risk { font-weight:700; }
+  button { font:inherit; padding:7px 12px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--ink); cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button.danger { background:var(--bad); color:#fff; border-color:var(--bad); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .detail { margin-top:10px; padding-top:10px; border-top:1px dashed var(--line); }
+  .mute { color:var(--mute); } .ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); }
+  table { border-collapse:collapse; width:100%; } td,th { text-align:left; padding:4px 8px 4px 0; font-size:13px; }
+  .scroll { overflow-x:auto; }
+  ol.try { margin:6px 0 0; padding-left:20px; } ol.try li { margin:2px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>GhostRing</h1>
+  <p class="sub">A small seller gets a ranked list of suspicious payments, each backed by proof from their own past fraud, and can send the refund through the <b>PayPal API</b> in one click.</p>
+
+  <div class="card">
+    <b>Try it (about a minute)</b>
+    <ol class="try">
+      <li>Find a row tagged <span class="pill pp">PayPal sandbox payment linked</span> and press <b>Explain &amp; decide</b>.</li>
+      <li>Read the evidence (closest confirmed frauds), the explanation, and the decision. If the decision is <b>refund</b>, press <b>Refund via PayPal sandbox</b> and confirm.</li>
+      <li>The row then shows <b>refunded</b>. PayPal allows one refund per captured payment.</li>
+    </ol>
+    <p class="mute" style="font-size:13px;margin:8px 0 0"><span id="left"></span> Rows without a linked payment show the recommendation only. All money is PayPal <b>sandbox</b> test money.</p>
+  </div>
+
+  <div class="card" id="backtest"><span class="mute">Loading measured results…</span></div>
+  <div id="flags"></div>
+  <p class="mute" style="font-size:12px">Data: a sample of the public ULB credit-card fraud dataset (anonymised features). The "demo sample check" compares flags to hidden truth that no part of the system saw; it is one small sample. The risk index is a ranking signal, not proof of fraud.</p>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const esc = t => String(t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money = n => '$' + Number(n).toFixed(2);
+let FL = {};
+
+async function api(path, method='GET') {
+  const r = await fetch(path, {method});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.detail || r.statusText);
+  return j;
+}
+
+async function loadBacktest() {
+  try {
+    const b = await api('/api/backtest');
+    const t = b.top10, u = b.top20;
+    $('#backtest').innerHTML =
+      `<b>Demo sample check (hidden truth):</b> of the top ${t.flagged} flags, <b>${t.actual_fraud}</b> were real fraud (${Math.round(t.precision*100)}% precision); ` +
+      `of the top ${u.flagged}, <b>${u.actual_fraud}</b> (${Math.round(u.precision*100)}%). ` +
+      `Random picking would give about ${(b.base_rate*100).toFixed(1)}%. ` +
+      `<span class="mute">(${b.n_new} new transactions, ${b.frauds_in_new} fraud)</span>`;
+  } catch (e) {
+    $('#backtest').innerHTML = '<span class="mute">Measured result unavailable right now.</span>';
+  }
+}
+
+async function loadFlags() {
+  $('#flags').innerHTML = '<p class="mute">Loading flagged transactions… the first load can take a few seconds.</p>';
+  try {
+    let {flags} = await api('/api/flags');
+    FL = Object.fromEntries(flags.map(f => [f.tx_id, f]));
+    const grp = f => (f.paypal_linked && !f.refunded) ? 0 : f.refunded ? 2 : 1;
+    flags = flags.slice().sort((a,b) => (grp(a) - grp(b)) || (a.rank - b.rank));
+    const total = flags.filter(f => f.paypal_linked).length;
+    const open = flags.filter(f => f.paypal_linked && !f.refunded).length;
+    $('#left').textContent = total ? `${open} of ${total} PayPal-linked payments can still be refunded.` : '';
+    $('#flags').innerHTML = flags.map(f => `
+      <div class="card" id="c-${f.tx_id}">
+        <div class="row">
+          <div><b>${f.tx_id}</b> · ${money(f.amount)} · <span class="risk">risk ${f.risk_index}</span>
+            <span class="pill">rank ${f.rank}/${f.n_new_transactions}</span>
+            ${f.paypal_linked ? '<span class="pill pp">PayPal sandbox payment linked</span>' : ''}
+            ${f.refunded ? '<span class="pill ok">refunded</span>' : ''}</div>
+          <button class="primary" onclick="explain('${f.tx_id}')">Explain &amp; decide</button>
+        </div>
+        <div class="detail" id="d-${f.tx_id}" hidden></div>
+      </div>`).join('');
+  } catch (e) {
+    $('#flags').innerHTML = '<p class="bad">Could not load flags: ' + esc(e.message) + '. Please refresh in a few seconds.</p>';
+  }
+}
+
+async function explain(id) {
+  const d = $('#d-' + id); d.hidden = false; d.innerHTML = '<span class="mute">Thinking…</span>';
+  try {
+    const p = await api('/api/explain/' + id, 'POST');
+    const v = p.verifier;
+    const verdict = v.passed ? '<span class="ok">AI text passed the check (no number or ID the scorer did not produce)</span>'
+      : '<span class="warn">AI text rejected (' + (p.llm_error ? 'AI unavailable' : esc(v.problems.join('; '))) + ') – safe template used</span>';
+    const rows = p.facts.similar_confirmed_frauds.map(n =>
+      `<tr><td>${n.tx_id}</td><td>${money(n.amount)}</td><td>${n.similarity}</td></tr>`).join('');
+    const canRefund = p.final_action === 'refund' && p.paypal_linked && !p.refunded;
+    d.innerHTML = `
+      <p>${esc(p.explanation)}</p>
+      <div class="scroll"><table><tr><th>Closest confirmed fraud</th><th>Amount</th><th>Similarity</th></tr>${rows}</table></div>
+      <p>${verdict}. <span class="mute">Source: ${p.source}.</span></p>
+      <p><b>Decision: ${p.final_action}</b>
+        ${p.llm_proposed_action !== p.final_action ? `<span class="mute"> (AI asked for ${p.llm_proposed_action}; ${p.action_note})</span>` : ''}</p>
+      ${p.refunded ? `<p class="ok">Refund ${p.refunded.status} · ${p.refunded.refund_id}. PayPal allows one refund per captured payment, so this row is locked.</p>` : ''}
+      ${p.final_action === 'refund' && !p.paypal_linked ? '<p class="warn"><b>Recommendation only.</b> This demo row has no PayPal sandbox payment attached, so there is nothing to refund. Rows tagged "PayPal sandbox payment linked" can run the live refund.</p>' : ''}
+      ${p.paypal_linked || p.final_action !== 'refund' ? `<button class="danger" ${canRefund ? '' : 'disabled'} onclick="refund('${id}')">Refund via PayPal sandbox</button>` : ''}`;
+  } catch (e) { d.innerHTML = '<span class="bad">' + esc(e.message) + '</span>'; }
+}
+
+async function refund(id) {
+  const amt = FL[id] ? ' (' + money(FL[id].amount) + ')' : '';
+  if (!confirm('Issue a PayPal SANDBOX refund for ' + id + amt + '? This can be done only once per payment.')) return;
+  try { await api('/api/refund/' + id, 'POST'); await loadFlags(); await explain(id); }
+  catch (e) { alert(e.message); }
+}
+
+loadBacktest(); loadFlags();
+</script>
+</body>
+</html>

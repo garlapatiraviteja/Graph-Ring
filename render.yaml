@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: ghostring
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: LLM_MODE
+        value: gemini
+      - key: PAYPAL_BASE
+        value: https://api-m.sandbox.paypal.com
+      - key: GEMINI_MODEL
+        sync: false        # set to the exact model that worked in your local .env
+      - key: PAYPAL_CURRENCY
+        sync: false        # MUST match the currency your sandbox accounts use (e.g. INR)
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_SECRET
+        sync: false

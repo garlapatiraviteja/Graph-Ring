@@ -1,0 +1,826 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Ranks suspicious payments from a handful of confirmed frauds, shows the evidence for each flag, and refunds via the PayPal REST API once a person confirms.">
+<meta property="og:title" content="GhostRing: fraud triage for small PayPal sellers">
+<meta property="og:description" content="Rank suspicious payments from a handful of confirmed frauds, see the evidence, and refund through PayPal after a person confirms.">
+<title>GhostRing: fraud triage for small PayPal sellers</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+
+:root{--bg:#f5faff;--card:#fff;--ink:#1f3a5f;--mute:#667c99;--line:#e3edf7;--soft:#f1f7fd;--blue:#2a7de1;--blue-bg:#e4f1ff;--red:#e4574a;--red-bg:#ffedea;--amber:#b8741a;--amber-bg:#fff4dc;--green:#23906a;--green-bg:#e0f6ed;--shadow:0 8px 30px rgba(60,120,190,.10);--font:"Figtree",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+html{color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.5 var(--font);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+button{font:inherit;font-weight:600;padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+button:hover:not(:disabled){border-color:var(--mute)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.pri{background:var(--blue);border-color:var(--blue);color:#fff}
+button.dng{background:var(--red);border-color:var(--red);color:#fff}
+.small{font-size:12px;color:var(--mute)}
+.chip{display:inline-block;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:600;white-space:nowrap}
+.c-blue{background:var(--blue-bg);color:var(--blue)}.c-red{background:var(--red-bg);color:var(--red)}.c-amber{background:var(--amber-bg);color:var(--amber)}.c-green{background:var(--green-bg);color:var(--green)}.c-gray{background:var(--soft);color:var(--mute);border:1px solid var(--line)}
+.hi{--c:var(--red)}.md{--c:var(--amber)}.lo{--c:var(--green)}
+
+/* top bar */
+.top{display:flex;align-items:center;gap:22px;padding:0 28px;height:60px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+.logo{display:flex;align-items:center;gap:9px;font-weight:800;font-size:18px;letter-spacing:-.02em}
+.logo svg{width:28px;height:28px}
+.top nav{display:flex;gap:4px;margin-right:auto}
+.top nav a{color:var(--mute);text-decoration:none;font-weight:600;padding:6px 11px;border-radius:7px}
+.top nav a:hover{color:var(--ink);background:var(--soft)}
+.sbx{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--green);background:var(--green-bg);padding:5px 12px;border-radius:99px}
+.sbx::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--green)}
+main{max-width:1240px;margin:0 auto;padding:30px 28px 60px}
+.head h1{margin:0;font-size:32px;letter-spacing:-.035em;line-height:1.1}
+.head p{margin:6px 0 0;color:var(--mute);font-size:15px;max-width:62ch}
+
+/* stat strip */
+.strip{display:grid;grid-template-columns:repeat(4,1fr);margin:24px 0;background:var(--card);border:1px solid var(--line);border-radius:12px}
+.st1{padding:16px 20px;border-left:1px solid var(--line)}.st1:first-child{border-left:0}
+.st1 .v{font-size:28px;font-weight:800;letter-spacing:-.03em;line-height:1.1;font-variant-numeric:tabular-nums}
+.st1 .k{color:var(--mute);font-size:13px}
+.st1.hl .v{color:var(--blue)}
+@media(max-width:800px){.strip{grid-template-columns:1fr 1fr}.st1:nth-child(3){border-left:0}.st1:nth-child(n+3){border-top:1px solid var(--line)}}
+
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;align-items:start}
+@media(max-width:1060px){.grid{grid-template-columns:1fr}}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:20px;overflow:hidden}
+.panel-h{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 18px}
+.panel-h h2{font-size:15px;margin:0}
+.panel .body{padding:0 18px 18px}
+.tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.tabs{display:flex;gap:2px;background:var(--soft);padding:3px;border-radius:9px;border:1px solid var(--line)}
+.tabs button{border:0;background:transparent;padding:4px 11px;font-size:13px;color:var(--mute)}
+.tabs button[aria-pressed="true"]{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(12,31,58,.15)}
+.search input{border:1px solid var(--line);background:var(--soft);color:var(--ink);font:inherit;padding:6px 11px;border-radius:8px;width:170px}
+.search input:focus{outline:2px solid var(--blue);border-color:transparent}
+
+/* queue */
+.th,.tr{display:grid;grid-template-columns:minmax(150px,1.2fr) 90px minmax(110px,1fr) 128px 74px;gap:12px;align-items:center;padding:12px 18px}
+.th{color:var(--mute);font-size:12px;font-weight:600;background:var(--soft);border-top:1px solid var(--line);padding-block:8px}
+.tr{border-top:1px solid var(--line);border-left:4px solid var(--c);cursor:pointer;padding-left:14px}
+.tr:hover{background:var(--soft)}
+.pay b{display:block;font-variant-numeric:tabular-nums}.pay small{color:var(--mute);font-size:12px}
+.amt{font-weight:700;font-variant-numeric:tabular-nums}
+.risk{display:flex;align-items:center;gap:9px}.risk .n{width:26px;font-weight:800;color:var(--c);font-variant-numeric:tabular-nums}
+.meter{flex:1;height:6px;border-radius:3px;background:var(--line);overflow:hidden}
+.meter i{display:block;height:100%;background:var(--c,var(--blue));border-radius:3px;transition:width .8s ease}
+.tr button{padding:5px 11px;font-size:13px}
+.empty{padding:40px 16px;text-align:center;color:var(--mute)}
+@media(max-width:760px){.th{display:none}.tr{grid-template-columns:1fr auto;row-gap:8px}.tr .risk,.tr .st{grid-column:1/-1}}
+.legal{color:var(--mute);font-size:12px;max-width:90ch}
+
+/* side */
+.prec{font-size:34px;font-weight:800;letter-spacing:-.03em;line-height:1}
+.prow{margin-top:14px;font-size:13px}.prow>div:first-child{display:flex;justify-content:space-between;margin-bottom:4px}
+.rule{display:flex;gap:10px;font-size:13px;margin-bottom:12px}.rule:last-child{margin-bottom:0}
+.rule i{font-style:normal;font-weight:800;color:var(--blue);flex:none;width:16px}
+.act{display:grid;gap:10px}.act-i{font-size:13px;border-left:3px solid var(--green);padding-left:10px}
+
+/* drawer */
+.scrim{position:fixed;inset:0;background:rgba(8,17,31,.55);opacity:0;visibility:hidden;transition:opacity .2s;z-index:30}
+.scrim.on{opacity:1;visibility:visible}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(560px,100%);background:var(--card);z-index:31;transform:translateX(100%);transition:transform .26s cubic-bezier(.2,.8,.2,1);display:flex;flex-direction:column;box-shadow:-10px 0 40px rgba(8,17,31,.3)}
+.drawer.on{transform:none}
+.d-h{padding:18px 20px;display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line);border-top:5px solid var(--c,var(--blue))}
+.d-h h3{margin:0;font-size:20px;letter-spacing:-.02em}.d-h .sub{color:var(--mute);font-size:13px}
+.x{border:0;font-size:22px;padding:0 10px;height:34px;background:transparent}
+.d-b{flex:1;overflow:auto;padding:18px 20px;display:grid;gap:18px;align-content:start}
+.d-f{border-top:1px solid var(--line);padding:14px 20px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;background:var(--soft)}
+.sec h4{margin:0 0 7px;font-size:13px;color:var(--mute);font-weight:600}
+.pipe{display:flex;list-style:none;margin:0;padding:0}
+.pipe li{flex:1;text-align:center;font-size:11.5px;color:var(--mute);position:relative;padding-top:20px;line-height:1.25}
+.pipe li::before{content:"";position:absolute;top:4px;left:50%;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:var(--line);z-index:1}
+.pipe li::after{content:"";position:absolute;top:9px;left:-50%;width:100%;height:2px;background:var(--line)}
+.pipe li:first-child::after{display:none}
+.pipe li.done{color:var(--ink)}.pipe li.done::before,.pipe li.done::after{background:var(--green)}
+.pipe li.warn::before{background:var(--amber)}
+.pipe li.next{color:var(--ink);font-weight:700}.pipe li.next::before{background:var(--card);border:3px solid var(--blue)}
+.score{display:flex;align-items:center;gap:14px}.score .big{font-size:42px;font-weight:800;letter-spacing:-.04em;line-height:1;color:var(--c);font-variant-numeric:tabular-nums}
+.why{margin:0;font-size:15px;line-height:1.65;border-left:3px solid var(--blue);padding:2px 0 2px 14px}
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;color:var(--mute);font-weight:600;padding:6px 0;border-bottom:1px solid var(--line)}
+.tbl td{padding:8px 0;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+.sim{display:flex;align-items:center;gap:8px}.sim .meter{width:70px;flex:none;--c:var(--blue)}
+.callout{padding:11px 13px;border-radius:9px;font-size:13px}.callout b{display:block}
+.decision .a{font-size:20px;font-weight:800;text-transform:capitalize}
+.a.refund{color:var(--red)}.a.review{color:var(--amber)}.a.approve{color:var(--green)}
+.spin{display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--blue);animation:sp .8s linear infinite;vertical-align:-2px;margin-right:8px}
+@keyframes sp{to{transform:rotate(360deg)}}
+dialog{border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);padding:24px;width:min(420px,92vw)}
+dialog::backdrop{background:rgba(8,17,31,.6)}dialog h3{margin:0 0 6px}dialog p{margin:0 0 18px;color:var(--mute)}
+dialog .acts{display:flex;justify-content:flex-end;gap:8px}
+.toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:9px;font-weight:600;opacity:0;transition:.25s;z-index:60;pointer-events:none;max-width:90vw}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+
+/* graph ghost */
+.gg{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:12px;align-items:center;padding:24px 26px;margin-bottom:20px}
+.gg h2{margin:0 0 6px;font-size:24px;letter-spacing:-.025em}
+.gg p{margin:0 0 14px;color:var(--mute);max-width:46ch;font-size:15px}
+.gg-l{list-style:none;margin:0 0 14px;padding:0;display:grid;gap:5px;font-size:13px}
+.gg-l i{display:inline-block;width:11px;height:11px;border-radius:50%;background:var(--k);margin-right:8px;vertical-align:-1px}
+.gg-l i.ghost{background:transparent;border:2px dashed var(--mute)}
+.gg-v svg{width:100%;height:auto;display:block}
+.gg .e{stroke:var(--line);stroke-width:1.3}
+.gg .nd{fill:var(--fc);stroke:var(--fc);stroke-width:2}
+.gg .nd.u{animation:fillin .7s both}
+.gg .nd.h{fill:var(--card);stroke:var(--mute);stroke-dasharray:3 2}
+@keyframes fillin{from{fill:var(--card);stroke:var(--mute);stroke-dasharray:3 2}to{fill:var(--fc);stroke:var(--fc);stroke-dasharray:0}}
+.ego{width:100%;height:auto;display:block}.ego text{font-size:11px;fill:var(--mute)}
+@media(max-width:800px){.gg{grid-template-columns:1fr}}
+
+/* boot */
+#boot{position:fixed;inset:0;z-index:100;background:#08111f;display:grid;place-items:center;color:#e8eef8;transition:opacity .5s,visibility .5s}
+#boot.gone{opacity:0;visibility:hidden}
+.boot-in{width:min(340px,84vw)}
+.ringmark{width:92px;height:92px;margin:0 0 22px}
+.ringmark .orbit{transform-origin:50% 50%;animation:sp 2.4s linear infinite}
+.boot-in h2{margin:0;font-size:30px;font-weight:800;letter-spacing:-.03em}
+.boot-in .tag{margin:4px 0 22px;color:#93a2ba;font-size:14px}
+.bl{list-style:none;margin:0;padding:0;display:grid;gap:9px;font-size:14px}
+.bl li{display:flex;align-items:center;gap:10px;color:#5d6b82}
+.bl li::before{content:"";width:14px;height:14px;border-radius:50%;border:2px solid #2a3b57;flex:none}
+.bl li.run{color:#e8eef8}.bl li.run::before{border-top-color:#5b9dff;animation:sp .8s linear infinite}
+.bl li.ok{color:#9fb2cf}.bl li.ok::before{background:#4cd195;border-color:#4cd195}
+.bbar{height:3px;border-radius:2px;background:#1f2e47;overflow:hidden;margin:20px 0 10px}
+.bbar i{display:block;height:100%;width:4%;background:#5b9dff;transition:width .5s}
+#bmsg{font-size:12.5px;color:#93a2ba;min-height:19px}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+
+/* landing / product sections */
+html{scroll-behavior:smooth}
+section[id],main[id]{scroll-margin-top:76px}
+.wrap{max-width:1240px;margin:0 auto;padding:0 28px}
+.hero{padding:64px 0 36px}
+.hero .wrap{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:40px;align-items:center}
+.eyebrow{display:inline-block;font-size:12.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--blue);background:var(--blue-bg);padding:4px 12px;border-radius:99px;margin-bottom:16px}
+.hero h1{margin:0;font-size:52px;line-height:1.04;letter-spacing:-.045em}
+.hero h1 em{font-style:normal;color:var(--blue)}
+.hero .lead{margin:18px 0 0;font-size:18px;color:var(--mute);max-width:56ch;line-height:1.55}
+.cta{display:flex;gap:10px;flex-wrap:wrap;margin-top:26px}
+.cta a{text-decoration:none;font-weight:700;padding:11px 20px;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+.cta a.pri{background:var(--blue);border-color:var(--blue);color:#fff}
+.proof{display:flex;gap:26px;flex-wrap:wrap;margin-top:30px;padding-top:22px;border-top:1px solid var(--line)}
+.proof b{display:block;font-size:26px;letter-spacing:-.03em;line-height:1.1}
+.proof span{font-size:13px;color:var(--mute)}
+.hero-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:0 10px 30px rgba(12,31,58,.08)}
+.hero-card .row{display:flex;align-items:center;gap:12px;padding:11px 4px;border-top:1px solid var(--line)}
+.hero-card .row:first-of-type{border-top:0}
+.hero-card .row b{font-size:13.5px}.hero-card .row small{display:block;color:var(--mute);font-size:12px}
+.hero-card .amt{margin-left:auto;font-weight:800;font-variant-numeric:tabular-nums}
+.band{padding:44px 0}
+.band.alt{background:var(--card);border-block:1px solid var(--line)}
+.band h2{margin:0 0 6px;font-size:30px;letter-spacing:-.035em}
+.band .sub{margin:0 0 26px;color:var(--mute);font-size:15.5px;max-width:68ch}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+.card{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:20px}
+.band.alt .card{background:var(--soft)}
+.card .n{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--blue-bg);color:var(--blue);font-weight:800;margin-bottom:12px}
+.card h3{margin:0 0 6px;font-size:16px}.card p{margin:0;color:var(--mute);font-size:14px}
+.vs{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:800px){.hero .wrap,.vs{grid-template-columns:1fr}.hero h1{font-size:38px}}
+.vs .card ul{margin:8px 0 0;padding-left:18px;color:var(--mute)}
+.vs .card.good{border-color:var(--green)}
+.tech{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+footer.foot{padding:30px 0 50px;color:var(--mute);font-size:13px;border-top:1px solid var(--line)}
+footer.foot .wrap{display:flex;gap:20px;justify-content:space-between;flex-wrap:wrap}
+footer.foot p{margin:0;max-width:80ch}
+
+/* ---- Old manga theme ---- */
+:root{--bg:#f3eedf;--card:#fffdf6;--ink:#111;--mute:#4a463c;--line:#cfc7b0;--soft:#ebe5d2;--blue:#1d3f9a;--blue-bg:#dfe6f7;--red:#d62828;--red-bg:#f8d9d3;--amber:#8a5a00;--amber-bg:#f6e3a8;--green:#1f6f43;--green-bg:#d3e8d0;--ink-line:#111;--gold:#f5c518;--font:"Zen Kaku Gothic New","Hiragino Kaku Gothic ProN","Yu Gothic",system-ui,sans-serif;--disp:"Dela Gothic One","Zen Kaku Gothic New",Impact,sans-serif}
+html{background:var(--bg);color-scheme:light}
+body{font-weight:500;font-size:15px;background:var(--bg) radial-gradient(rgba(17,17,17,.10) 1px,transparent 1.5px) 0 0/7px 7px}
+h1,h2,h3,.logo,.st1 .v,.prec,.risk .n,.proof b,.decision .a,.score .big{font-family:var(--disp);font-weight:400}
+:focus-visible{outline:3px solid var(--red);outline-offset:2px}
+button{font-weight:800;border:2.5px solid #111;border-radius:2px;background:var(--card);color:#111;box-shadow:3px 3px 0 #111;transition:transform .08s,box-shadow .08s}
+button:hover:not(:disabled){transform:translate(-1px,-1px);box-shadow:4px 4px 0 #111;border-color:#111}
+button:active:not(:disabled){transform:translate(2px,2px);box-shadow:1px 1px 0 #111}
+button.pri,.cta a.pri{background:var(--gold);color:#111;border-color:#111}
+button.dng{background:var(--red);color:#fff;border-color:#111}
+.chip{border:2px solid #111;border-radius:2px;font-weight:800;padding:1px 8px}
+.c-blue{background:var(--blue-bg);color:#14306f}.c-red{background:var(--red);color:#fff}.c-amber{background:var(--gold);color:#111}.c-green{background:#bfe0bb;color:#111}.c-gray{background:var(--card);color:#333;border:2px solid #111}
+.callout{border:3px solid #111;border-radius:2px;box-shadow:4px 4px 0 #111}
+.callout.c-blue{background:var(--blue-bg);color:#14306f}.callout.c-green{background:#d3e8d0;color:#14391f}.callout.c-amber{background:#f8e6a6;color:#4a3000}
+.top{background:var(--card);border-bottom:4px solid #111;height:64px}
+.logo{font-size:20px}
+.top nav a{color:#111;font-weight:800;border-radius:2px;border:2px solid transparent}
+.top nav a:hover{background:var(--gold);border-color:#111}
+.sbx{background:var(--card);color:#111;border:2px solid #111;border-radius:2px;box-shadow:2px 2px 0 #111}
+.sbx::before{background:var(--green)}
+.hero{position:relative;overflow:hidden;isolation:isolate;padding:72px 0 52px}
+.hero::before{content:"";position:absolute;inset:0;z-index:-1;background:repeating-conic-gradient(from 0deg at 76% 52%,rgba(17,17,17,.2) 0 .8deg,transparent .8deg 5deg);-webkit-mask-image:radial-gradient(circle at 76% 52%,transparent 14%,#000 66%);mask-image:radial-gradient(circle at 76% 52%,transparent 14%,#000 66%)}
+.hero .wrap{position:relative;z-index:1}
+.hero h1{font-size:54px;line-height:1.12;letter-spacing:-.01em}
+.hero h1 em{display:inline-block;background:var(--red);color:#fff;padding:0 .16em;border:3px solid #111;box-shadow:5px 5px 0 #111;transform:skew(-6deg);margin-top:8px}
+.hero .lead{color:#222;font-size:17px;font-weight:500}
+.eyebrow{text-transform:none;letter-spacing:0;font-size:13px;font-weight:800;background:#111;color:var(--bg);border-radius:2px;padding:4px 12px;transform:rotate(-1.5deg)}
+.cta a{border:2.5px solid #111;border-radius:2px;background:var(--card);color:#111;box-shadow:4px 4px 0 #111;padding:12px 22px;font-weight:800;transition:transform .08s,box-shadow .08s}
+.cta a:hover{transform:translate(-1px,-1px);box-shadow:6px 6px 0 #111}
+.proof{border-top:3px solid #111}
+.hero-card{position:relative;background:var(--card);border:4px solid #111;border-radius:2px;box-shadow:8px 8px 0 #111;padding:20px}
+.hero-card::before{content:"Verified by code!";position:absolute;right:22px;top:-40px;padding:7px 18px;background:#fff;border:3px solid #111;border-radius:50%/60%;font:800 13px/1.2 var(--font)}
+.hero-card::after{content:"";position:absolute;right:58px;top:-14px;width:14px;height:14px;background:#fff;border-right:3px solid #111;border-bottom:3px solid #111;transform:rotate(45deg)}
+.hero-card .row{border-top:2px dashed #111}
+.band{padding:52px 0}
+.band.alt{background:var(--soft) radial-gradient(rgba(17,17,17,.14) 1.3px,transparent 1.7px) 0 0/9px 9px;border-block:4px solid #111}
+.band h2{display:inline-block;background:#111;color:var(--bg);padding:6px 16px;font-size:26px;transform:rotate(-.6deg);margin-bottom:12px}
+.band .sub{color:#222}
+.card,.band.alt .card{background:var(--card);border:3px solid #111;border-radius:2px;box-shadow:5px 5px 0 #111;padding:22px}
+.card .n{width:34px;height:34px;background:#111;color:var(--gold);font:400 16px var(--disp)}
+.vs .card.good{background:#d3e8d0 radial-gradient(rgba(17,17,17,.12) 1px,transparent 1.5px) 0 0/6px 6px;border-color:#111}
+.panel,.strip{background:var(--card);border:3px solid #111;border-radius:2px;box-shadow:6px 6px 0 #111}
+.panel-h{border-bottom:3px solid #111;background:var(--soft)}
+.panel-h h2{font-size:16px}
+.strip{overflow:hidden}
+.st1{border-left:3px solid #111}.st1:first-child{border-left:0}
+.st1 .v{font-size:30px;color:#111}.st1.hl .v{color:var(--red)}
+.th{background:#111;color:var(--bg);border-top:0;font-weight:800}
+.tr{border-top:2px solid #111;border-left:8px solid var(--c);transition:background .1s}
+.tr:hover{background:#fff1a8}
+.risk .n{font-size:18px}
+.meter{height:12px;border:2px solid #111;border-radius:0;background:var(--card)}
+.meter i{border-radius:0;background:repeating-linear-gradient(45deg,rgba(0,0,0,.28) 0 2px,transparent 2px 6px),var(--c,var(--blue))}
+.tabs{background:var(--card);border:2px solid #111;border-radius:2px;padding:2px}
+.tabs button{border:0;border-radius:0;background:transparent;box-shadow:none;color:#111;transform:none}
+.tabs button[aria-pressed="true"]{background:#111;color:var(--gold);box-shadow:none}
+.search input{border:2px solid #111;border-radius:2px;background:var(--card);color:#111;font-weight:600}
+.gg{background:var(--card) radial-gradient(rgba(17,17,17,.08) 1px,transparent 1.5px) 0 0/6px 6px}
+.gg .e{stroke:#111;opacity:.4}
+.x{border:0;box-shadow:none;background:transparent;font-size:26px}
+.x:hover:not(:disabled){box-shadow:none;transform:none;color:var(--red)}
+.drawer{background:var(--card);border-left:5px solid #111;box-shadow:none}
+.d-h{border-top-width:10px;border-bottom:3px solid #111}
+.d-f{background:var(--soft);border-top:3px solid #111}
+.why{border-left:5px solid #111;font-weight:500}
+.pipe li::before{border:2px solid #111}.pipe li::after{background:#111;height:3px}
+.pipe li.done::before{background:var(--green)}.pipe li.warn::before{background:var(--gold)}
+.tbl th{border-bottom:2px solid #111;color:#111}.tbl td{border-bottom:1px dashed #111}
+.scrim{background:rgba(17,17,17,.6) radial-gradient(rgba(255,255,255,.2) 1.2px,transparent 1.6px) 0 0/6px 6px}
+dialog{background:var(--card);color:#111;border:4px solid #111;border-radius:2px;box-shadow:8px 8px 0 #111}
+dialog::backdrop{background:rgba(17,17,17,.65)}
+dialog p{color:#333}
+.toast{background:#111;color:#fff;border:2px solid #111;border-radius:2px;box-shadow:4px 4px 0 var(--red)}
+.spin{border-top-color:var(--red)}
+footer.foot{background:#111;color:#e9e2cc;border-top:4px solid #111}
+footer.foot b{color:var(--gold)}
+#boot{background:var(--bg) radial-gradient(rgba(17,17,17,.12) 1.2px,transparent 1.6px) 0 0/8px 8px;color:#111}
+.boot-in{padding:26px;background:var(--card);border:4px solid #111;box-shadow:8px 8px 0 #111}
+.boot-in .tag,#bmsg{color:#333}
+.bl li{color:#777}.bl li::before{border-color:#111}
+.bl li.run{color:#111}.bl li.run::before{border-top-color:var(--red)}
+.bl li.ok{color:#222}.bl li.ok::before{background:var(--green);border-color:#111}
+.bbar{background:var(--card);border:2px solid #111;height:10px}.bbar i{background:repeating-linear-gradient(45deg,rgba(0,0,0,.3) 0 2px,transparent 2px 6px),var(--red)}
+@media(max-width:800px){.hero h1{font-size:34px}.hero{padding:56px 0 30px}.band h2{font-size:21px}}
+.by{font-weight:800;font-size:13px;background:var(--gold);color:#111;border:2px solid #111;border-radius:2px;padding:3px 10px;box-shadow:2px 2px 0 #111;white-space:nowrap}
+footer.foot .credit{font:400 18px var(--disp);color:var(--gold)}
+/* ---- Mobile / all-device responsive ---- */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{overflow-x:clip}
+img,svg{max-width:100%}
+.tabs{max-width:100%;overflow-x:auto;scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}
+.tabs button{white-space:nowrap}
+@media(max-width:1060px){main{padding-inline:20px}.wrap{padding-inline:20px}}
+@media(max-width:800px){
+  .top{flex-wrap:wrap;height:auto;gap:8px 10px;padding:9px max(14px,env(safe-area-inset-right)) 9px max(14px,env(safe-area-inset-left))}
+  .logo{font-size:18px}
+  .by{margin-left:auto;font-size:11.5px;padding:2px 8px}
+  .sbx{font-size:11.5px;padding:3px 9px}
+  .top nav{order:5;flex:1 0 100%;margin:0;overflow-x:auto;scrollbar-width:none;gap:2px;padding-bottom:2px}
+  .top nav::-webkit-scrollbar{display:none}
+  .top nav a{white-space:nowrap;padding:5px 10px;font-size:13.5px}
+  section[id],main[id]{scroll-margin-top:110px}
+  main{padding:22px 16px 44px}.wrap{padding-inline:16px}
+  .hero h1{font-size:clamp(28px,8.6vw,36px)}
+  .hero .lead{font-size:15.5px}
+  .hero-card{margin-top:34px}
+  .proof{gap:16px}.proof b{font-size:22px}
+  .head h1{font-size:26px!important}
+  .band{padding:38px 0}.band h2{font-size:clamp(18px,5.6vw,22px)}
+  .panel,.strip{box-shadow:4px 4px 0 #111}
+  .card,.band.alt .card{box-shadow:4px 4px 0 #111}
+  .gg{padding:18px}.gg h2{font-size:20px}
+  .panel-h{padding:12px 14px}.tools{width:100%}.search{flex:1 1 100%}.search input{width:100%;font-size:16px;padding:9px 12px}
+  .tr{padding:12px 12px 12px 12px}
+  .tr .st{grid-column:1}.tr>div:last-child{grid-column:2;justify-self:end}
+  button{min-height:40px}
+  .tr button{padding:7px 14px}
+  .panel .body{padding:0 14px 16px}
+  .d-h{padding:14px 16px}.d-b{padding:16px;gap:16px}.d-f{padding:12px 16px}.d-f button{flex:1 1 140px}
+  .pipe li{font-size:10.5px}
+  .ego text{font-size:14px}
+  .toast{bottom:calc(20px + env(safe-area-inset-bottom))}
+  footer.foot .wrap{flex-direction:column;gap:12px}
+}
+@media(max-width:480px){
+  .sbx{display:none}
+  .cta a{flex:1 1 100%;text-align:center}
+  .st1{padding:12px 14px}.st1 .v{font-size:24px}.st1 .k{font-size:12px}
+  .hero-card{padding:16px}
+  .hero-card::before{right:12px;font-size:12px;padding:6px 14px}
+  dialog{padding:20px}
+  dialog .acts button{flex:1}
+}
+@media(max-width:360px){.hero h1{font-size:27px}.top nav a{padding:5px 8px}}
+/* ---- Cinematic boot ---- */
+#boot{background:radial-gradient(circle at 50% 50%,transparent 35%,rgba(0,0,0,.7)),radial-gradient(rgba(255,255,255,.07) 1.2px,transparent 1.6px) 0 0/8px 8px,#161616;color:#f3eedf;overflow:hidden;clip-path:polygon(0 0,100% 0,100% 100%,0 100%);transition:clip-path .65s cubic-bezier(.7,0,.2,1)}
+#boot.gone{opacity:1;visibility:visible;clip-path:polygon(100% 0,100% 0,100% 100%,100% 100%)}
+#boot::before,#boot::after{content:"";position:absolute;left:0;right:0;height:8vh;background:#000;z-index:3;animation:barin .6s .05s cubic-bezier(.2,.8,.2,1) both}
+#boot::before{top:0;border-bottom:3px solid var(--red);transform:translateY(-100%)}
+#boot::after{bottom:0;border-top:3px solid var(--red);transform:translateY(100%)}
+@keyframes barin{to{transform:none}}
+.rays{position:absolute;left:50%;top:50%;width:260vmax;height:260vmax;margin:-130vmax 0 0 -130vmax;background:repeating-conic-gradient(rgba(255,255,255,.55) 0 .6deg,transparent .6deg 3.6deg);-webkit-mask-image:radial-gradient(circle,transparent 5%,#000 9%,transparent 40%);mask-image:radial-gradient(circle,transparent 5%,#000 9%,transparent 40%);opacity:0;animation:rays 1.5s .25s ease-out forwards}
+@keyframes rays{0%{opacity:0;transform:scale(.3)}40%{opacity:.9}100%{opacity:.3;transform:scale(1)}}
+.flash{position:absolute;inset:0;background:#fff;opacity:0;z-index:4;pointer-events:none;animation:flash .6s 1.75s ease-out}
+@keyframes flash{0%{opacity:.85}100%{opacity:0}}
+#boot .boot-in{position:relative;z-index:2;width:min(720px,92vw);padding:0;background:none;border:0;box-shadow:none;text-align:center;animation:shake .45s 1.75s}
+@keyframes shake{0%,100%{transform:none}20%{transform:translate(-6px,3px)}40%{transform:translate(5px,-4px)}60%{transform:translate(-3px,2px)}80%{transform:translate(2px,-1px)}}
+#boot .ringmark{display:block;width:84px;height:84px;margin:0 auto 12px}
+.ringmark .rg-d{transform-box:fill-box;transform-origin:center;opacity:0;animation:sp 9s linear infinite,fadein .5s .5s forwards}
+.ringmark .rg{animation:draw .9s .5s cubic-bezier(.6,0,.2,1) forwards}
+.ringmark .dot{transform-box:fill-box;transform-origin:center;transform:scale(0);animation:pop .35s 1.3s cubic-bezier(.3,1.6,.5,1) forwards}
+@keyframes draw{to{stroke-dashoffset:0}}@keyframes pop{to{transform:scale(1)}}@keyframes fadein{to{opacity:1}}
+#boot .ttl{margin:0;font-size:clamp(30px,9.6vw,80px);line-height:1;letter-spacing:.02em;color:#fff;text-shadow:4px 4px 0 #000}
+.ttl span{display:inline-block;opacity:0;transform:translateY(-70px) scale(2.4);animation:slam .35s cubic-bezier(.2,.9,.3,1.15) forwards;animation-delay:calc(.9s + var(--i)*.09s)}
+.ttl .r{color:var(--gold)}
+@keyframes slam{to{opacity:1;transform:none}}
+.ttl::after{content:"";display:block;height:8px;margin-top:10px;background:var(--red);transform:scaleX(0);transform-origin:left;animation:barx .5s 1.8s cubic-bezier(.2,.8,.2,1) forwards}
+@keyframes barx{to{transform:none}}
+#boot .tag{margin:14px 0 0;color:#e9e2cc;font-size:clamp(14px,3.6vw,18px);font-weight:700;clip-path:inset(0 100% 0 0);animation:type 1.1s steps(33) 2s forwards}
+@keyframes type{to{clip-path:inset(0 0 0 0)}}
+#boot .bl{counter-reset:st;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:26px;text-align:left}
+#boot .bl li{counter-increment:st;position:relative;display:block;padding:12px 12px 12px 50px;min-height:64px;font-size:13px;font-weight:700;line-height:1.35;color:#b9b3a2;border:2px solid rgba(255,255,255,.55);background:rgba(255,255,255,.05);opacity:0;transform:translateY(18px);animation:rise .45s forwards}
+#boot .bl li:nth-child(1){animation-delay:2.3s}#boot .bl li:nth-child(2){animation-delay:2.45s}#boot .bl li:nth-child(3){animation-delay:2.6s}
+@keyframes rise{to{opacity:1;transform:none}}
+#boot .bl li::before{content:counter(st);position:absolute;left:12px;top:12px;width:26px;height:26px;border-radius:2px;border:2px solid #fff;background:#fff;color:#111;font:400 13px/22px var(--disp);text-align:center;animation:none}
+#boot .bl li.run{color:#fff;border-color:var(--gold)}
+#boot .bl li.run::before{background:var(--gold);border-color:var(--gold);animation:blink .8s steps(2) infinite}
+#boot .bl li.ok{color:#e9e2cc;border-color:#3bbf93}
+#boot .bl li.ok::before{content:"\2713";background:#3bbf93;border-color:#3bbf93;animation:none}
+@keyframes blink{50%{opacity:.35}}
+#boot .bbar{height:14px;margin:22px 0 10px;background:rgba(255,255,255,.08);border:2px solid #fff}
+#boot .bbar i{background:repeating-linear-gradient(45deg,rgba(0,0,0,.3) 0 2px,transparent 2px 6px),var(--red)}
+#boot #bmsg{color:#cfc7b0;font-weight:600}
+@media(max-width:640px){#boot .bl{grid-template-columns:1fr;gap:8px;margin-top:20px}#boot .bl li{min-height:0;padding:9px 10px 9px 48px}#boot .bl li::before{top:50%;margin-top:-13px}#boot .ringmark{width:64px;height:64px}}
+@media(prefers-reduced-motion:reduce){.ttl span,#boot .bl li,#boot .tag,.rays,.ringmark .rg-d,.ringmark .dot{opacity:1!important;transform:none!important;clip-path:none!important}.ringmark .rg{stroke-dashoffset:0!important}.ttl::after,#boot::before,#boot::after{transform:none!important}}
+/* ---- Product theme (manga kept as accents) ---- */
+:root{--bg:#f6f5f1;--card:#fff;--ink:#151515;--mute:#6a665c;--line:#e4e1d8;--soft:#f1efe8;--blue-bg:#e6ecf9;--green-bg:#dcefe0;--amber-bg:#fbefc4;--red-bg:#fbe3df;--sh:0 1px 2px rgba(0,0,0,.04),0 8px 24px rgba(0,0,0,.05)}
+html,body{background:var(--bg)}body{background-image:none}
+h2,h3{font-family:var(--font);font-weight:800}
+#boot .ttl{font-family:var(--disp);font-weight:400}
+.st1 .v{font:800 28px/1.1 var(--font)}
+button{border:1px solid #d6d2c6;border-radius:8px;background:#fff;box-shadow:0 1px 0 rgba(0,0,0,.04);font-weight:700}
+button:hover:not(:disabled){transform:none;box-shadow:0 2px 8px rgba(0,0,0,.08);border-color:#b9b4a6}
+button:active:not(:disabled){transform:none;box-shadow:none}
+button.pri{background:#151515;border-color:#151515;color:#fff}
+button.pri:hover:not(:disabled){background:#333}
+button.dng{background:var(--red);border-color:var(--red);color:#fff}
+.chip{border:0;border-radius:6px;font-weight:700;padding:2px 9px}
+.c-blue{background:var(--blue-bg);color:#14306f}.c-red{background:var(--red);color:#fff}.c-amber{background:var(--amber-bg);color:#6b4500}.c-green{background:var(--green-bg);color:#14522f}.c-gray{background:var(--soft);color:#444;border:0}
+.callout{border:1px solid var(--line);border-left:4px solid #151515;border-radius:10px;box-shadow:none}
+.callout.c-blue{background:#fff;color:var(--ink);border-left-color:var(--gold)}
+.callout.c-green{background:#f1f9f3;color:#14391f;border-left-color:var(--green)}.callout.c-amber{background:#fffaea;color:#4a3000;border-left-color:var(--gold)}
+.top{background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);height:60px}
+.top nav a{border:0;border-radius:8px;color:var(--mute);font-weight:700}.top nav a:hover{background:var(--soft);color:var(--ink)}
+.sbx{border:1px solid #bfe3c9;background:var(--green-bg);color:#14522f;box-shadow:none;border-radius:99px}
+.by{background:transparent;border:1px solid var(--line);box-shadow:none;color:var(--mute);border-radius:99px}
+.banner{position:relative;overflow:hidden;isolation:isolate;display:grid;grid-template-columns:1.5fr 1fr;gap:28px;align-items:center;padding:32px 34px;margin-bottom:26px;border-radius:16px;color:#f3eedf;background:#151515 radial-gradient(rgba(255,255,255,.08) 1px,transparent 1.5px) 0 0/7px 7px}
+.banner::before{content:"";position:absolute;inset:0;z-index:-1;background:repeating-conic-gradient(from 0deg at 90% 50%,rgba(255,255,255,.13) 0 .7deg,transparent .7deg 5deg);-webkit-mask-image:radial-gradient(circle at 90% 50%,transparent 8%,#000 60%);mask-image:radial-gradient(circle at 90% 50%,transparent 8%,#000 60%)}
+.banner h1{margin:0;font:400 40px/1.12 var(--disp);color:#fff;letter-spacing:-.01em}
+.banner .lead{margin:12px 0 0;color:#d8d2c0;font-size:15.5px;max-width:54ch}
+.banner .cta{margin-top:20px}
+.banner .cta a{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:8px;box-shadow:none;padding:10px 18px}
+.banner .cta a.pri{background:var(--gold);color:#111;border-color:var(--gold)}
+.banner .cta a:hover{transform:none;box-shadow:none;filter:brightness(1.1)}
+.banner .proof{display:grid;gap:14px;border:0;margin:0;padding:0}
+.banner .proof div{display:flex;align-items:baseline;gap:12px}
+.banner .proof b{display:inline;min-width:78px;font:400 26px var(--disp);color:var(--gold)}.banner .proof span{color:#d8d2c0;font-size:13.5px}
+.head{margin-bottom:6px}.head h2{margin:0;font-size:22px}.head p{margin:4px 0 0;font-size:14.5px}
+.panel,.strip,.card,.gg{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--sh)}
+.panel-h{background:transparent;border-bottom:1px solid var(--line)}
+.panel-h h2{font-size:15px}
+.st1{border-left:1px solid var(--line)}.st1:first-child{border-left:0}.st1.hl .v{color:var(--red)}
+.th{background:var(--soft);color:var(--mute);border-top:1px solid var(--line);font-weight:700}
+.tr{border-top:1px solid var(--line);border-left:4px solid var(--c)}
+.tr.hi{background-image:radial-gradient(rgba(214,40,40,.15) 1px,transparent 1.5px),linear-gradient(90deg,rgba(214,40,40,.05),transparent 55%);background-size:6px 6px,100% 100%}
+.tr:hover,.tr.hi:hover{background-color:#faf8f2}
+.meter{height:6px;border:0;border-radius:3px;background:#ebe8df}
+.meter i{border-radius:3px;background:var(--c,var(--blue))}
+.tabs{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:3px}
+.tabs button{border-radius:7px;color:var(--mute)}
+.tabs button[aria-pressed="true"]{background:#151515;color:#fff}
+.search input{border:1px solid var(--line);border-radius:8px;background:#fff}
+.gg{background:var(--card)}.gg .e{opacity:.35}
+.band{padding:36px 0 44px}
+.band h2{display:block;background:none;color:var(--ink);padding:0;transform:none;font-size:24px;margin:0 0 6px}
+.band .sub{margin-bottom:22px;color:var(--mute)}
+.card{padding:22px}.card .n{background:#151515;color:var(--gold);border-radius:6px}
+.drawer{border-left:1px solid var(--line);box-shadow:-16px 0 48px rgba(0,0,0,.14)}
+.d-h{border-bottom:1px solid var(--line);background:var(--card) radial-gradient(rgba(0,0,0,.07) 1px,transparent 1.5px) 0 0/6px 6px}
+.d-f{background:var(--soft);border-top:1px solid var(--line)}
+.why{border-left:4px solid var(--gold)}
+.pipe li::after{background:var(--line);height:2px}.pipe li::before{border:2px solid var(--line)}
+.pipe li.done::before,.pipe li.done::after{background:var(--green);border-color:var(--green)}.pipe li.warn::before{background:var(--gold);border-color:var(--gold)}.pipe li.next::before{border:3px solid #151515;background:#fff}
+.tbl th{border-bottom:1px solid var(--line);color:var(--mute)}.tbl td{border-bottom:1px solid var(--line)}
+.scrim{background:rgba(21,21,21,.45)}
+dialog{border:1px solid var(--line);border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.25)}dialog::backdrop{background:rgba(21,21,21,.5)}
+.toast{background:#151515;border:0;border-radius:10px;box-shadow:var(--sh)}
+footer.foot{background:transparent;color:var(--mute);border-top:1px solid var(--line)}
+footer.foot b{color:var(--ink)}footer.foot .credit{font:800 14px var(--font);color:var(--ink)}
+@media(max-width:800px){.banner{grid-template-columns:1fr;padding:24px 20px;gap:20px}.banner h1{font-size:clamp(26px,7.6vw,34px)}.banner .proof{grid-template-columns:repeat(3,1fr);gap:10px}.banner .proof div{display:block}.banner .proof b{display:block;font-size:22px;min-width:0}.banner .proof span{font-size:12px}.panel,.strip,.card{box-shadow:var(--sh)}}
+@media(max-width:480px){.banner .cta a{flex:1 1 100%}}
+.gg-btns{display:flex;gap:8px;flex-wrap:wrap}
+.gg-cap{margin-top:14px;min-height:3.4em;padding:10px 12px;border-radius:10px;background:var(--soft);border-left:4px solid var(--gold);font-size:13.5px;line-height:1.45}
+/* ---- PayPal emphasis ---- */
+:root{--pp:#0070ba;--pp-d:#003087;--pp-l:#009cde}
+.pp-pill{margin-left:auto;display:inline-flex;align-items:center;gap:7px;padding:5px 13px;border-radius:99px;background:var(--pp-d);color:#fff;font-weight:800;font-size:13px;white-space:nowrap;box-shadow:0 2px 8px rgba(0,48,135,.25)}
+.pp-pill::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--pp-l)}
+.pp-tag{display:inline-block;margin-bottom:14px;padding:5px 13px;border-radius:99px;background:var(--pp-d);border:1px solid var(--pp-l);color:#fff;font-weight:700;font-size:13px}
+.ppband{display:grid;grid-template-columns:auto 1fr auto;gap:24px;align-items:center;margin:0 0 24px;padding:18px 24px;border-radius:14px;background:#fff;border:1px solid #cfe3f5;border-left:6px solid var(--pp);box-shadow:var(--sh)}
+.pp-id{display:grid;gap:2px}.pp-logo{font:800 28px/1 var(--font);letter-spacing:-.02em;color:var(--pp-d)}.pp-id small{color:var(--mute);font-weight:600}
+.pp-steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,1fr);gap:14px;counter-reset:pp}
+.pp-steps li{counter-increment:pp;position:relative;padding-left:36px;font-size:13px;line-height:1.35}
+.pp-steps li::before{content:counter(pp);position:absolute;left:0;top:0;width:26px;height:26px;border-radius:50%;background:var(--pp);color:#fff;font-weight:800;display:grid;place-items:center;font-size:13px}
+.pp-steps b{display:block;font-size:14px}.pp-steps span{color:var(--mute)}
+.pp-live{display:flex;gap:22px}.pp-live b{display:block;font:800 26px/1 var(--font);color:var(--pp)}.pp-live span{font-size:12px;color:var(--mute)}
+.ppchip{display:inline-block;margin-top:2px;padding:1px 8px;border-radius:6px;background:#e3f1fb;color:var(--pp-d);font-size:12px;font-weight:700}
+#d-refund,#dlg-yes{background:var(--pp);border-color:var(--pp-d);color:#fff}
+#d-refund:hover:not(:disabled),#dlg-yes:hover{background:var(--pp-d)}
+.boot-pp{display:inline-block;margin-top:16px;padding:5px 14px;border:1px solid var(--pp-l);border-radius:99px;color:#bfe6fa;font-weight:700;font-size:12.5px}
+footer.foot .credit{font:600 12px var(--font);color:var(--mute)}
+@media(max-width:900px){.ppband{grid-template-columns:1fr;gap:14px;padding:16px}.pp-steps{grid-template-columns:1fr;gap:10px}.pp-live{gap:28px}}
+@media(max-width:480px){.pp-pill{font-size:12px;padding:4px 10px}}
+/* ---- Header refinement ---- */
+.ppbar{background:var(--pp-d);color:#fff;font-size:13px}
+.ppbar .wrap{display:flex;justify-content:space-between;align-items:center;gap:12px;padding-block:7px}
+.ppbar b{font-weight:800}.ppbar-t span{opacity:.85}
+.ppbar .sbx{background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.28);padding:2px 11px}
+.ppbar .sbx::before{background:#4cd195}
+.top-cta{padding:9px 18px;border-radius:9px;background:#151515;color:#fff;font-weight:700;text-decoration:none;white-space:nowrap}
+.top-cta:hover{background:#333}
+.top nav{gap:2px}
+@media(max-width:800px){.top-cta{display:none}.ppbar .wrap{padding-inline:14px}}
+@media(max-width:640px){.ppbar-t span{display:none}}
+/* ---- PayPal main-ingredient section ---- */
+.ppband{display:block;padding:22px 24px 24px}
+.pp-top{display:grid;grid-template-columns:auto 1fr auto;gap:22px;align-items:center}
+.pp-copy h2{margin:0;font-size:20px;color:var(--pp-d)}.pp-copy p{margin:4px 0 0;color:var(--mute);font-size:14px;max-width:62ch}
+.pp-flow{list-style:none;margin:20px 0 0;padding:0;display:grid;grid-template-columns:repeat(5,1fr);gap:22px}
+.pp-flow li{position:relative;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:#fff;font-size:12.5px;line-height:1.35}
+.pp-flow li b{display:block;font-size:14px;margin-bottom:2px}.pp-flow li span{color:var(--mute)}
+.pp-flow li.pp{background:var(--pp);border-color:var(--pp-d);color:#fff}.pp-flow li.pp span{color:#d6ecfa}
+.pp-flow li:not(:last-child)::after{content:"";position:absolute;right:-17px;top:50%;width:12px;height:12px;margin-top:-6px;border-top:3px solid var(--pp-d);border-right:3px solid var(--pp-d);transform:rotate(45deg)}
+@media(max-width:900px){.pp-top{grid-template-columns:1fr;gap:12px}.pp-flow{grid-template-columns:1fr;gap:18px}.pp-flow li:not(:last-child)::after{right:auto;left:50%;top:auto;bottom:-15px;margin:0 0 0 -6px;transform:rotate(135deg)}}
+.sbx.demo{background:#fff4dc!important;color:#6b4500!important;border-color:#e0b84a!important;display:flex}.sbx.demo::before{background:#b8741a!important}
+@media(prefers-reduced-motion:reduce){.flash,.rays{display:none!important}#boot .boot-in{animation:none!important}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="mark" viewBox="0 0 32 32"><circle cx="16" cy="16" r="11" fill="none" stroke="#111" stroke-width="5" stroke-dasharray="52 20" stroke-linecap="round" transform="rotate(-50 16 16)"/><circle cx="16" cy="16" r="3.8" fill="#d62828"/></symbol>
+</svg>
+
+<div id="boot" role="status" aria-live="polite"><div class="rays" aria-hidden="true"></div><div class="flash" aria-hidden="true"></div><div class="boot-in">
+  <svg class="ringmark" viewBox="0 0 32 32" aria-hidden="true"><circle class="rg-d" cx="16" cy="16" r="14.6" fill="none" stroke="#f5c518" stroke-width="1" stroke-dasharray="2 4"/><circle class="rg" cx="16" cy="16" r="10" fill="none" stroke="#fff" stroke-width="3.2" stroke-dasharray="62.8" stroke-dashoffset="62.8" stroke-linecap="round" transform="rotate(-90 16 16)"/><circle class="dot" cx="16" cy="16" r="3.8" fill="#d62828"/></svg>
+  <h2 class="ttl" aria-label="GhostRing"><span class="" style="--i:0">G</span><span class="" style="--i:1">H</span><span class="" style="--i:2">O</span><span class="" style="--i:3">S</span><span class="" style="--i:4">T</span><span class="r" style="--i:5">R</span><span class="r" style="--i:6">I</span><span class="r" style="--i:7">N</span><span class="r" style="--i:8">G</span></h2>
+  <p class="tag">Find the fraud. Send the refund.</p>
+  <ul class="bl"><li id="s1">Connecting to the server</li><li id="s2">Ranking payments against your confirmed fraud</li><li id="s3">Loading the review queue</li></ul>
+  <div class="bbar"><i id="bfill"></i></div><div id="bmsg">Starting…</div>
+  <div class="boot-pp">Refunds through the PayPal REST API</div>
+</div></div>
+
+<div class="ppbar"><div class="wrap"><span class="ppbar-t"><b>Integrates the PayPal REST API</b></span><span class="sbx">PayPal sandbox · test money</span></div></div>
+<header class="top" id="top">
+  <div class="logo"><svg><use href="#mark"/></svg>GhostRing</div>
+  <nav aria-label="Main"><a href="#demo">Review queue</a><a href="#paypal">PayPal</a><a href="#perf">Performance</a><a href="#how">How it works</a><a href="#policy">Refund policy</a></nav>
+  <a class="top-cta" href="#queue">Review payments</a>
+</header>
+
+<main id="demo">
+  <section class="banner" aria-label="GhostRing overview"><div><span class="pp-tag">Fraud triage for small PayPal sellers</span><h1>Find the fraud. Send the refund.</h1><p class="lead">GhostRing ranks incoming payments by fraud risk from just a handful of confirmed cases, shows the evidence behind each flag, and refunds through the PayPal API once a person confirms.</p><div class="cta"><a class="pri" href="#queue">Review flagged payments</a><a href="#how">How it works</a></div></div>
+  <div class="proof"><div><b id="hero-prec">…</b><span>were real fraud in the top flags (demo sample)</span></div><div><b>0</b><span>models to train</span></div><div><b>100%</b><span>of refunds confirmed by a person</span></div></div></section>
+  <section class="ppband" id="paypal" aria-label="PayPal integration">
+    <div class="pp-top">
+      <div class="pp-id"><span class="pp-logo">PayPal</span><small>Sandbox · REST API</small></div>
+      <div class="pp-copy"><h2>PayPal is where a flag becomes money back</h2><p>GhostRing recommends; you confirm. Before a refund, GhostRing checks PayPal's own record of the payment, and PayPal validates the refund request itself. Rows tagged "PayPal payment linked" are real sandbox payments.</p></div>
+      <div class="pp-live" id="ppstat" aria-live="polite"></div>
+    </div>
+    <ol class="pp-flow">
+      <li class="pp"><b>Customer pays</b><span>Captured in PayPal (sandbox)</span></li>
+      <li><b>GhostRing scores</b><span>Risk index and evidence</span></li>
+      <li><b>You confirm</b><span>Every refund needs a person</span></li>
+      <li class="pp"><b>PayPal checks, then refunds</b><span>Capture checked, then refund issued</span></li>
+      <li class="pp"><b>Money returned</b><span>Refund ID shown in the app</span></li>
+    </ol>
+  </section>
+  <div class="head"><h2>Review queue</h2><p>Payments ranked by fraud risk. Open one to see the evidence and, where a refund is warranted, send it through PayPal.</p></div>
+  <div class="callout c-blue" id="quick" style="margin:18px 0 0"></div>
+  <section class="strip" id="kpis" aria-label="Summary"></section>
+
+  <div class="grid">
+    <div>
+      <section class="panel" id="queue" aria-label="Flagged payments">
+        <div class="panel-h"><h2>Flagged payments</h2>
+          <div class="tools">
+            <div class="tabs" id="tabs" role="group" aria-label="Filter">
+              <button data-f="all" aria-pressed="true">All</button><button data-f="open" aria-pressed="false">Refund eligible</button><button data-f="rec" aria-pressed="false">Review only</button><button data-f="done" aria-pressed="false">Refunded</button>
+            </div>
+            <label class="search"><input id="q" placeholder="Search payment ID" aria-label="Search payment ID"></label>
+          </div></div>
+        <div class="th"><div>Payment</div><div>Amount</div><div>Risk</div><div>Status</div><div></div></div>
+        <div id="flags"><div class="empty"><span class="spin"></span>Loading payments…</div></div>
+      </section>
+    </div>
+
+    <aside>
+      <section class="panel" id="perf"><div class="panel-h"><h2>Detection performance</h2></div><div class="body" id="backtest"><span class="small">Loading…</span></div></section>
+      <section class="panel" id="bench"><div class="panel-h"><h2>Benchmark (5 seeds)</h2></div><div class="body">
+        <table class="tbl"><tr><th>Labelled frauds</th><th>Ghost</th><th>Logistic</th><th>Forest</th></tr>
+        <tr><td>5</td><td>0.81</td><td>0.73</td><td>0.83</td></tr><tr><td>10</td><td>0.82</td><td>0.74</td><td>0.84</td></tr><tr><td>25</td><td>0.83</td><td>0.79</td><td>0.85</td></tr></table>
+        <div class="small" style="margin-top:10px">PR-AUC on the public ULB dataset (<code>evaluate.py</code>, mean of five seeds). Graph Ghost needs no training and is steadier than logistic regression; Random Forest is slightly more accurate.</div>
+      </div></section>
+      <section class="panel" id="policy"><div class="panel-h"><h2>How a refund happens</h2></div><div class="body">
+        <div class="rule"><i>1</i><div>The model explains and proposes; code decides. A refund requires a risk index of <b><span id="thr">60</span> or higher</b> and a nearest confirmed fraud with similarity of at least <b><span id="thrs">0.70</span></b>.</div></div>
+        <div class="rule"><i>2</i><div>Code rejects any number or ID in the model's text that the scorer did not produce.</div></div>
+        <div class="rule"><i>3</i><div>You confirm. PayPal rejects a second full refund of the same payment.</div></div>
+      </div></section>
+      <section class="panel"><div class="panel-h"><h2>Recent refunds</h2></div><div class="body"><div class="act" id="activity"></div></div></section>
+    </aside>
+  </div>
+  <section class="panel gg" id="ghost" aria-label="Graph Ghost">
+    <div>
+      <h2>Graph Ghost</h2>
+      <p>Each payment is linked to the payments most similar to it. Your few confirmed frauds pass their label along those links, so unlabelled "ghost" payments acquire a risk score. Nothing is trained. The evidence for each flag is the confirmed fraud it most resembles.</p>
+      <ul class="gg-l"><li><i style="--k:var(--red)"></i>Confirmed fraud</li><li><i style="--k:var(--green)"></i>Known-good payment</li><li><i class="ghost"></i>Unlabelled payment, scored by its neighbours</li></ul>
+      <div class="gg-btns"><button id="replay" class="pri">Replay</button><button id="reshuffle">New example</button></div>
+      <div class="gg-cap" id="ggcap" aria-live="polite"></div>
+      <div class="small" style="margin-top:8px">Illustration of the method. Open any payment in the queue to see the confirmed frauds it most resembles.</div>
+    </div>
+    <div class="gg-v" id="ghostsvg" role="img" aria-label="Diagram: confirmed fraud labels spreading through a similarity graph to unlabelled payments"></div>
+  </section>
+</main>
+
+<section class="band" id="how" aria-label="How it works"><div class="wrap">
+  <h2>From flag to refund in four steps</h2>
+  <p class="sub">Every step is visible in the app, so you can see why a payment was flagged before any money moves.</p>
+  <div class="cols">
+    <div class="card"><div class="n">1</div><h3>Score</h3><p>Graph Ghost links each payment to its nearest neighbours and propagates risk from your confirmed frauds along those links.</p></div>
+    <div class="card"><div class="n">2</div><h3>Explain</h3><p>A language model drafts a short explanation and proposes refund, review or approve, using only facts the scorer produced.</p></div>
+    <div class="card"><div class="n">3</div><h3>Verify</h3><p>Code rejects any number or ID the scorer did not produce, then enforces the refund policy. The model cannot override it.</p></div>
+    <div class="card"><div class="n">4</div><h3>Refund</h3><span class="ppchip" style="margin:0 0 8px">PayPal REST API</span><p>You confirm; GhostRing checks the capture with PayPal and issues the refund. A captured payment can be fully refunded only once.</p></div>
+  </div>
+  <div class="tech" aria-label="Built with"><span class="chip c-blue">PayPal REST API (sandbox)</span><span class="chip c-gray">Label propagation on a kNN graph</span><span class="chip c-gray">FastAPI</span><span class="chip c-gray">Gemini</span><span class="chip c-gray">scikit-learn</span></div>
+</div></section>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true" aria-label="Payment details" inert>
+  <div class="d-h" id="d-head"><div id="d-title"></div><button class="x" id="d-close" aria-label="Close">×</button></div>
+  <div class="d-b" id="d-body"></div><div class="d-f" id="d-foot"></div>
+</aside>
+<dialog id="dlg"><h3>Send this PayPal refund?</h3><p id="dlg-p"></p><div class="acts"><button id="dlg-no">Cancel</button><button class="dng" id="dlg-yes">Refund with PayPal</button></div></dialog>
+<div class="toast" id="toast" role="status"></div>
+
+<footer class="foot"><div class="wrap"><p><b>GhostRing</b> integrates the PayPal REST API and issues refunds in the sandbox, with test money. It is an independent project, not affiliated with or endorsed by PayPal. Transaction features come from the anonymised ULB credit-card dataset. The risk index ranks payments; it is not proof of fraud, and every refund needs a person's confirmation.</p><p class="credit">Made by @iRT_GVVS AS</p></div></footer>
+
+<script>
+const $=s=>document.querySelector(s);
+const esc=t=>String(t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let CURR='USD';const SYM={USD:'$',INR:'₹',EUR:'€',GBP:'£'};
+const money=n=>(SYM[CURR]||esc(CURR)+' ')+Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+let THRESHOLD=60,MINSIM=0.7;
+let FL={},ALL=[],FILTER='all',QUERY='',CUR=null;const LAST={};
+
+/* ---- Demo mode: used only when no backend answers (local file or ?demo) ---- */
+let DEMO=false;
+const DEMO_OK=location.protocol==='file:'||new URLSearchParams(location.search).has('demo');
+const MOCK=(()=>{
+  let s=11;const rnd=()=>(s=(s*16807)%2147483647)/2147483647;
+  const N=584,flags=[];
+  const amts=[1249.99,86.4,412.0,29.99,975.5,153.2,2210.0,64.75,318.9,540.0,19.5,1480.25,97.0,730.8];
+  const hist=['FR-1042','FR-0877','FR-2310','FR-1566','FR-0391'];
+  const sims=f=>hist.map((h,i)=>({tx_id:h,amount:+(f.amount*(0.7+rnd()*0.6)).toFixed(2),similarity:+Math.max(.35,Math.min(.98,f.risk_index/100-i*.06+rnd()*.05)).toFixed(2)}));
+  for(let i=0;i<14;i++){
+    const risk=Math.round(94-i*5.2-rnd()*3);
+    const f={tx_id:'TX-'+(48210+Math.floor(rnd()*9000)+i*37),amount:amts[i],risk_index:Math.max(12,risk),rank:i+1,n_new_transactions:N,paypal_linked:i%3!==2&&i<10,refunded:false};
+    f.similar_confirmed_frauds=sims(f);flags.push(f);
+  }
+  const explain=id=>{
+    const f=flags.find(x=>x.tx_id===id);if(!f)throw new Error('Payment not found');
+    const sm=f.similar_confirmed_frauds,top=sm[0];
+    const act=f.risk_index>=60&&top.similarity>=.7?'refund':f.risk_index>=40?'review':'approve';
+    return{risk_index:f.risk_index,paypal_linked:f.paypal_linked,paypal_capture:f.paypal_linked?{status:f.refunded?'REFUNDED':'COMPLETED',amount:f.amount.toFixed(2),currency:'USD'}:null,
+      refunded:f.refunded?{status:'COMPLETED',refund_id:f.refunded}:false,
+      facts:{similar_confirmed_frauds:sm},verifier:{passed:true,problems:[]},llm_error:false,source:'demo data',
+      explanation:`This payment of ${money(f.amount)} has a risk index of ${f.risk_index}. Its closest confirmed fraud is ${top.tx_id} at similarity ${top.similarity}, and it also resembles ${sm[1].tx_id} and ${sm[2].tx_id}.`,
+      final_action:act,llm_proposed_action:act==='refund'?'refund':'review',
+      action_note:act==='refund'?'':'Risk or similarity is below the refund policy.'};
+  };
+  return{
+    backtest:()=>({top10:{flagged:10,actual_fraud:10,precision:1},top20:{flagged:20,actual_fraud:19,precision:.95},base_rate:24/584,n_new:N,frauds_in_new:24}),
+    flags:()=>({flags:flags.map(f=>({...f,refunded:!!f.refunded}))}),
+    explain,
+    refund:id=>{const f=flags.find(x=>x.tx_id===id);
+      if(!f||!f.paypal_linked)throw new Error('No PayPal payment attached');
+      if(f.refunded)throw new Error('This payment was already refunded');
+      f.refunded='RF-'+Math.random().toString(36).slice(2,10).toUpperCase();return{status:'COMPLETED',refund_id:f.refunded}}
+  };
+})();
+function mockApi(path,method){
+  const id=decodeURIComponent(path.split('/').pop());
+  if(path.startsWith('/api/backtest'))return MOCK.backtest();
+  if(path.startsWith('/api/flags'))return MOCK.flags();
+  if(path.startsWith('/api/explain/'))return MOCK.explain(id);
+  if(path.startsWith('/api/refund/')&&method==='POST')return MOCK.refund(id);
+  throw new Error('Not found');
+}
+function enterDemo(){
+  if(DEMO)return;DEMO=true;
+  const b=document.querySelector('.sbx');if(b){b.textContent='DEMO DATA · simulated';b.classList.add('demo')}
+  const pp=document.querySelector('#paypal .pp-copy p');
+  if(pp)pp.textContent='Demo mode: no PayPal call is made and these payments are simulated. With the backend connected, rows tagged "PayPal payment linked" are real sandbox payments.';
+  const h=document.querySelector('.head');
+  if(h)h.insertAdjacentHTML('afterend','<div class="callout c-amber" style="margin:14px 0 0"><b>Demo mode: everything here is simulated</b>The payments, scores, refunds and performance numbers below are made up for previewing the layout. They are not real results and no PayPal call is made.</div>');
+}
+async function api(path,method='GET'){
+  if(DEMO)return mockApi(path,method);
+  let r;
+  try{r=await fetch(path,{method})}
+  catch(e){if(!DEMO_OK)throw new Error('Cannot reach the server. Check your connection and try again');enterDemo();return mockApi(path,method)}
+  const j=await r.json().catch(()=>({}));
+  if(DEMO_OK&&[404,405,501].includes(r.status)&&!j.detail){enterDemo();return mockApi(path,method)}
+  if(!r.ok)throw new Error(j.detail||r.statusText);
+  return j;
+}
+const toast=m=>{const t=$('#toast');t.textContent=m;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),3200)};
+const level=r=>r>=THRESHOLD?['hi','High','c-red']:r>=40?['md','Medium','c-amber']:['lo','Low','c-green'];
+const nearSim=f=>{const s=f.similar_confirmed_frauds;return s&&s.length?Number(s[0].similarity):null};
+const state=f=>f.refunded?'done':(f.paypal_linked&&f.risk_index>=THRESHOLD&&(nearSim(f)!==null&&nearSim(f)>=MINSIM))?'open':'rec';
+const statusChip=f=>({open:'<span class="chip c-blue">Refund eligible</span>',rec:'<span class="chip c-gray">Review only</span>',done:'<span class="chip c-green">Refunded</span>'})[state(f)];
+
+async function loadBacktest(){
+  try{
+    const b=await api('/api/backtest'),t=b.top10,u=b.top20,base=b.base_rate*100,p=Math.round(t.precision*100);
+    const row=(c,n,pct,val)=>`<div class="prow"><div><span>${n}</span><b>${val}</b></div><div class="meter" style="--c:${c}"><i style="width:0" data-w="${pct}"></i></div></div>`;
+    $('#backtest').innerHTML=`<div class="prec">${t.actual_fraud} of ${t.flagged}</div><div class="small">were real fraud among the top ${t.flagged} flags, scored against labels withheld from the system.</div>`+
+      row('var(--green)',`Top ${t.flagged} flags`,t.precision*100,p+'%')+row('var(--blue)',`Top ${u.flagged} flags`,u.precision*100,Math.round(u.precision*100)+'%')+row('var(--mute)','Random picking',Math.max(base,1.5),base.toFixed(1)+'%')+
+      `<div class="small" style="margin-top:12px">Sample: ${b.n_new} new transactions, ${b.frauds_in_new} fraudulent.</div>`;
+    const hp=$('#hero-prec');if(hp)hp.textContent=t.actual_fraud+' of '+t.flagged;
+    requestAnimationFrame(()=>requestAnimationFrame(()=>document.querySelectorAll('.meter i[data-w]').forEach(e=>e.style.width=e.dataset.w+'%')));
+  }catch(e){$('#backtest').innerHTML='<span class="small">Performance is unavailable right now.</span>'}
+}
+
+function renderQuick(){
+  const el=$('#quick');if(!el)return;
+  const n=ALL.filter(f=>state(f)==='open').length;
+  el.innerHTML=n
+    ?`<b>Try it in 30 seconds</b>Click <b>Explain</b> on a row marked <i>Refund eligible</i>, read the evidence, then confirm the refund. ${n} sandbox payment${n===1?'':'s'} available; each can be fully refunded once.`
+    :`<b>No refund-eligible payments right now</b>Each sandbox payment can be fully refunded once, so used ones drop out. Open any row to see the evidence and the verified recommendation.`;
+}
+function renderOverview(){renderQuick();
+  const open=ALL.filter(f=>state(f)==='open'),done=ALL.filter(f=>f.refunded),sum=a=>a.reduce((s,f)=>s+Number(f.amount),0);
+  const k=(v,t,c='')=>`<div class="st1 ${c}"><div class="v">${v}</div><div class="k">${t}</div></div>`;
+  const ppEl=$('#ppstat');if(ppEl)ppEl.innerHTML=`<div><b>${ALL.filter(f=>f.paypal_linked).length}</b><span>PayPal payments linked</span></div><div><b>${done.length}</b><span>refunded via PayPal</span></div>`;
+  $('#kpis').innerHTML=k(ALL.length,'Flagged payments')+k(money(sum(ALL.filter(f=>!f.refunded))),'Amount at risk')+k(open.length,'Refund eligible','hl')+k(money(sum(done)),`Refunded via PayPal (${done.length})`);
+  $('#activity').innerHTML=done.length?done.slice(0,5).map(f=>`<div class="act-i"><b>${money(f.amount)}</b> refunded<div class="small">${esc(f.tx_id)}</div></div>`).join(''):'<div class="small">No refunds yet. Open a payment marked Refund eligible to send one.</div>';
+}
+
+function renderFlags(){
+  const grp=f=>({open:0,rec:1,done:2})[state(f)],q=QUERY.trim().toLowerCase();
+  const list=ALL.slice().sort((a,b)=>grp(a)-grp(b)||a.rank-b.rank).filter(f=>(FILTER==='all'||state(f)===FILTER)&&(!q||String(f.tx_id).toLowerCase().includes(q)));
+  if(!list.length){$('#flags').innerHTML='<div class="empty">No payments match this view.</div>';return}
+  $('#flags').innerHTML=list.map(f=>{const c=level(f.risk_index)[0];return `
+    <div class="tr ${c}" tabindex="0" role="button" data-open="${esc(f.tx_id)}" aria-label="Explain ${esc(f.tx_id)}">
+      <div class="pay"><b>${esc(f.tx_id)}</b><small>Rank ${f.rank} of ${f.n_new_transactions}</small>${f.paypal_linked?'<div><span class="ppchip">PayPal payment linked</span></div>':''}</div>
+      <div class="amt">${money(f.amount)}</div>
+      <div class="risk"><span class="n">${f.risk_index}</span><span class="meter"><i style="width:${Math.min(100,f.risk_index)}%"></i></span></div>
+      <div class="st">${statusChip(f)}</div>
+      <div><button class="${state(f)==='open'?'pri':''}" data-open="${esc(f.tx_id)}">Explain</button></div>
+    </div>`}).join('');
+}
+
+async function loadFlags(){
+  try{
+    const fr=await api('/api/flags'),flags=fr.flags;if(fr.currency)CURR=fr.currency;ALL=flags;FL=Object.fromEntries(flags.map(f=>[f.tx_id,f]));
+    const f0=flags[0]||{};if(Number(f0.refund_min_risk)>0)THRESHOLD=Number(f0.refund_min_risk);if(Number(f0.refund_min_similarity)>0)MINSIM=Number(f0.refund_min_similarity);const te=$('#thr');if(te)te.textContent=THRESHOLD;const ts=$('#thrs');if(ts)ts.textContent=MINSIM.toFixed(2);
+    renderOverview();renderFlags();
+  }catch(e){$('#flags').innerHTML='<div class="empty">Could not load payments: '+esc(e.message)+'.<br><button id="retry" style="margin-top:10px">Try again</button></div>'}
+}
+
+const openDrawer=()=>{const d=$('#drawer');d.inert=false;$('#scrim').classList.add('on');d.classList.add('on');d.setAttribute('aria-hidden','false');setTimeout(()=>$('#d-close').focus(),60)};
+const closeDrawer=()=>{const d=$('#drawer');$('#scrim').classList.remove('on');d.classList.remove('on');d.setAttribute('aria-hidden','true');d.inert=true;CUR=null};
+
+function paint(id,p){
+  const f=FL[id]||{},r=p.risk_index??f.risk_index??0,[c,l,cc]=level(r),v=p.verifier;
+  $('#d-head').className='d-h '+c;
+  $('#d-title').innerHTML=`<h3>${esc(id)}</h3><div class="sub">${money(f.amount||0)} · Rank ${f.rank||'–'} of ${f.n_new_transactions||'–'}</div>`;
+  const ev=p.facts.similar_confirmed_frauds.map(n=>{const s=Math.max(0,Math.min(1,Number(n.similarity)));
+    return `<tr><td>${esc(n.tx_id)}</td><td>${money(n.amount)}</td><td><span class="sim"><span class="meter"><i style="width:${(s*100).toFixed(0)}%"></i></span>${esc(n.similarity)}</span></td></tr>`}).join('');
+  const pc=p.paypal_capture,canRefund=p.final_action==='refund'&&p.paypal_linked&&!p.refunded&&(!pc||pc.status==='COMPLETED');
+  const steps=[['Ghost score','done'],['Evidence','done'],[p.llm_error?'Template used':'Model explained',p.llm_error?'warn done':'done'],[v.passed?'Code verified':'Text replaced',v.passed?'done':'warn done'],['You confirm',p.refunded?'done':canRefund?'next':''],['PayPal refund',p.refunded?'done':'']];
+  $('#d-body').innerHTML=`
+    <div class="sec"><h4>From flag to refund</h4><ol class="pipe">${steps.map(s=>`<li class="${s[1]}">${s[0]}</li>`).join('')}</ol></div>
+    <div class="sec"><h4>Risk index</h4><div class="score ${c}"><span class="big">${r}</span><span class="meter"><i style="width:${Math.min(100,r)}%"></i></span><span class="chip ${cc}">${l}</span></div></div>
+    <div class="sec"><h4>Why it was flagged</h4><p class="why">${esc(p.explanation)}</p></div>
+    <div class="sec"><h4>How this payment relates to confirmed fraud</h4>${egoSvg(r,c,p.facts.similar_confirmed_frauds)}<div class="small">Thicker lines mean a closer match. This shows the evidence; the score itself comes from propagating labels through the full similarity graph.</div></div>
+    <div class="sec"><h4>Closest confirmed frauds</h4><table class="tbl"><tr><th>Payment</th><th>Amount</th><th>Similarity</th></tr>${ev}</table></div>
+    <div class="callout ${v.passed?'c-green':'c-amber'}"><b>${v.passed?'Verified by code':'Model text replaced'}</b>${v.passed?'The explanation contains no number or ID the scorer did not produce.':(p.llm_error?'The model was unavailable, so a template explanation is shown.':esc(v.problems.join('; '))+'. A template explanation is shown.')} <span style="opacity:.75">Source: ${esc(p.source)}.</span></div>
+    <div class="decision sec"><h4>Recommended action</h4><div class="a ${esc(p.final_action)}">${esc(p.final_action)}</div>
+      ${p.llm_proposed_action!==p.final_action?`<div class="small">Model proposed ${esc(p.llm_proposed_action)}. ${esc(p.action_note)}</div>`:''}</div>
+    ${pc&&pc.status&&pc.status!=='UNKNOWN'?`<div class="callout c-gray"><b>PayPal record <span class="ppchip">checked with PayPal</span></b>Payment ${esc(pc.status)} · ${esc(pc.amount)} ${esc(pc.currency)}. ${pc.status==='COMPLETED'?'GhostRing checks this record before refunding, and PayPal validates the refund itself.':pc.status==='REFUNDED'?'PayPal shows this payment as already refunded.':'A refund is blocked until PayPal shows the payment as COMPLETED for this amount.'}</div>`:''}
+    ${p.refunded?`<div class="callout c-green"><b>${p.refunded.status==='ALREADY_REFUNDED'?'Already refunded in PayPal':'PayPal refund '+esc(String(p.refunded.status||'').toLowerCase())}</b>${p.refunded.refund_id?'Reference '+esc(p.refunded.refund_id)+'. ':''}A second full refund of this payment would be rejected by PayPal.</div>`:''}
+    ${p.final_action==='refund'&&!p.paypal_linked?'<div class="callout c-blue"><b>Recommendation only</b>This payment has no PayPal sandbox payment attached, so there is nothing to refund.</div>':''}`;
+  $('#d-foot').innerHTML='<button id="d-cancel">Close</button>'+(p.paypal_linked||p.final_action!=='refund'?`<button class="dng" id="d-refund" ${canRefund?'':'disabled'}>Refund ${money(f.amount||0)} via PayPal</button>`:'');
+}
+
+let GSEED=7,GT=[];
+function ghostDemo(seed=GSEED){
+  GSEED=seed;GT.forEach(clearTimeout);GT=[];
+  let s=seed;const rnd=()=>(s=(s*16807)%2147483647)/2147483647;
+  const W=560,H=260,N=22,P=[];
+  for(let i=0;i<N;i++)P.push({x:30+rnd()*(W-60),y:25+rnd()*(H-50),t:'u',nb:[]});
+  [0,5,11].forEach(i=>P[i].t='f');[3,9,16,19].forEach(i=>P[i].t='g');
+  const E=new Set();
+  P.forEach((a,i)=>{P.map((b,j)=>[j,(a.x-b.x)**2+(a.y-b.y)**2]).filter(o=>o[0]!==i).sort((m,n)=>m[1]-n[1]).slice(0,2).forEach(o=>{E.add(Math.min(i,o[0])+'-'+Math.max(i,o[0]));})});
+  const edges=[...E].map(k=>k.split('-').map(Number));
+  edges.forEach(([a,b])=>{P[a].nb.push(b);P[b].nb.push(a)});
+  const bfs=t=>{const d=P.map(p=>p.t===t?0:Infinity),q=P.flatMap((p,i)=>p.t===t?[i]:[]);
+    while(q.length){const i=q.shift();P[i].nb.forEach(j=>{if(d[j]===Infinity){d[j]=d[i]+1;q.push(j)}})}return d};
+  const dF=bfs('f'),dG=bfs('g');
+  const ln=edges.map(([a,b])=>`<line class="e" x1="${P[a].x.toFixed(1)}" y1="${P[a].y.toFixed(1)}" x2="${P[b].x.toFixed(1)}" y2="${P[b].y.toFixed(1)}"/>`).join('');
+  const nd=P.map((p,i)=>{
+    const d=Math.min(dF[i],dG[i]),fc=p.t==='f'?'var(--red)':p.t==='g'?'var(--green)':dF[i]<=dG[i]?'var(--red)':'var(--green)';
+    if(p.t==='u'&&d===Infinity)return `<circle class="nd h" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="5.5"/>`;
+    return `<circle class="nd ${p.t==='u'?'u':''}" style="--fc:${fc};${p.t==='u'?`animation-delay:${(0.6+d*0.55).toFixed(2)}s;`:''}" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${p.t==='u'?5.5:8}"/>`}).join('');
+  $('#ghostsvg').innerHTML=`<svg viewBox="0 0 ${W} ${H}" aria-hidden="true">${ln}${nd}</svg>`;
+  const cap=$('#ggcap'),btn=$('#replay'),say=t=>{if(cap)cap.innerHTML=t};
+  const hops={};let lean=0,good=0;
+  P.forEach((p,i)=>{if(p.t!=='u')return;const d=Math.min(dF[i],dG[i]);if(d===Infinity)return;hops[d]=(hops[d]||0)+1;dF[i]<=dG[i]?lean++:good++});
+  const nU=P.filter(p=>p.t==='u').length,nF=P.filter(p=>p.t==='f').length,nG=P.filter(p=>p.t==='g').length;
+  const maxD=Math.max(0,...Object.keys(hops).map(Number));let done=0;
+  say(`<b>Start:</b> ${nF} confirmed frauds, ${nG} known-good, ${nU} unlabelled.`);
+  if(btn){btn.disabled=true;btn.textContent='Playing…'}
+  for(let d=1;d<=maxD;d++)GT.push(setTimeout(()=>{done+=hops[d]||0;say(`<b>Step ${d}:</b> ${done} of ${nU} unlabelled payments now carry a risk score.`)},(0.6+d*0.55)*1000));
+  GT.push(setTimeout(()=>{const left=nU-done;say(`<b>Done:</b> ${done} of ${nU} payments scored from only ${nF} confirmed frauds; ${lean} lean toward fraud and ${good} toward good.`+(left?` ${left} stay unscored because nothing close to them is labelled.`:''));if(btn){btn.disabled=false;btn.textContent='Replay'}},(0.6+maxD*0.55+0.8)*1000));
+}
+function egoSvg(r,c,list){
+  const n=Math.min(list.length,5),W=500,H=230,cx=250,cy=105,rx=185,ry=72,col={hi:'var(--red)',md:'var(--amber)',lo:'var(--green)'}[c];
+  let e='',nd='';
+  list.slice(0,n).forEach((f,i)=>{
+    const a=(-90+(i+.5)*360/n)*Math.PI/180,x=(cx+rx*Math.cos(a)).toFixed(1),y=(cy+ry*Math.sin(a)).toFixed(1),sm=Math.max(0,Math.min(1,Number(f.similarity)));
+    e+=`<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="var(--red)" stroke-width="${(1+sm*5).toFixed(1)}" stroke-linecap="round" opacity="${(.3+sm*.7).toFixed(2)}"/>`;
+    nd+=`<circle cx="${x}" cy="${y}" r="9" fill="var(--red)"/><text x="${x}" y="${(+y+24).toFixed(1)}" text-anchor="middle">${esc(String(f.tx_id).slice(0,14))} · ${esc(f.similarity)}</text>`;
+  });
+  return `<svg class="ego" viewBox="0 0 ${W} ${H}" role="img" aria-label="This payment linked to its ${n} closest confirmed frauds">${e}${nd}<circle cx="${cx}" cy="${cy}" r="19" fill="${col}"/><text x="${cx}" y="${cy+5}" text-anchor="middle" style="fill:var(--card);font-size:14px;font-weight:800">${r}</text></svg>`;
+}
+async function openCase(id){
+  CUR=id;openDrawer();const f=FL[id]||{};
+  $('#d-head').className='d-h';$('#d-title').innerHTML=`<h3>${esc(id)}</h3><div class="sub">${money(f.amount||0)}</div>`;
+  $('#d-body').innerHTML='<div class="small"><span class="spin"></span>Analysing this payment…</div>';$('#d-foot').innerHTML='';
+  try{const p=await api('/api/explain/'+encodeURIComponent(id),'POST');LAST[id]=p;if(CUR===id)paint(id,p)}
+  catch(e){if(CUR===id)$('#d-body').innerHTML='<div class="callout c-amber"><b>Could not analyse this payment</b>'+esc(e.message)+'</div>'}
+}
+function askRefund(){const f=FL[CUR]||{};$('#dlg-p').textContent=`This sends a PayPal sandbox refund of ${money(f.amount||0)} for ${CUR}. A payment can be fully refunded only once.`;$('#dlg').showModal()}
+async function doRefund(){
+  const id=CUR;$('#dlg').close();const b=$('#d-refund');if(b){b.disabled=true;b.textContent='Refunding…'}
+  try{await api('/api/refund/'+encodeURIComponent(id),'POST');await loadFlags();toast('Refund sent for '+id);await openCase(id)}
+  catch(e){toast(e.message);if(b){b.disabled=false;b.textContent='Refund '+money((FL[id]||{}).amount||0)+' via PayPal'}}
+}
+
+document.addEventListener('click',e=>{
+  const o=e.target.closest('[data-open]');if(o){e.stopPropagation();return openCase(o.dataset.open)}
+  const t=e.target.closest('#tabs button');if(t){FILTER=t.dataset.f;document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-pressed',b===t));return renderFlags()}
+  if(e.target.closest('#d-close,#d-cancel,#scrim'))return closeDrawer();
+  if(e.target.closest('#d-refund'))return askRefund();
+  if(e.target.closest('#dlg-no'))return $('#dlg').close();
+  if(e.target.closest('#dlg-yes'))return doRefund();
+  if(e.target.closest('#retry'))return loadFlags();
+});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&CUR)closeDrawer();if(e.key==='Enter'&&e.target.matches('.tr'))openCase(e.target.dataset.open)});
+$('#q').addEventListener('input',e=>{QUERY=e.target.value;renderFlags()});
+$('#replay').addEventListener('click',()=>ghostDemo(GSEED));
+const SEEDS=[7,13,29,41,5,19];let SI=0;
+$('#reshuffle').addEventListener('click',()=>{SI=(SI+1)%SEEDS.length;ghostDemo(SEEDS[SI])});
+
+async function boot(){
+  let SEEN=false;try{SEEN=!!sessionStorage.getItem("gr_boot");sessionStorage.setItem("gr_boot","1")}catch(e){}
+  const MINBOOT=matchMedia("(prefers-reduced-motion: reduce)").matches?800:(SEEN?700:3800),t0=Date.now(),msg=m=>$('#bmsg').textContent=m,bar=n=>$('#bfill').style.width=n+'%';
+  const st=(id,s)=>$('#'+id).className=s;
+  const slow=setTimeout(()=>msg('Waking the server. The first request can take up to a minute.'),3500);
+  const hide=()=>{clearTimeout(slow);ghostDemo();$('#boot').classList.add('gone');setTimeout(()=>$('#boot').remove(),700)};
+  const fs=setTimeout(hide,20000);
+  st('s1','run');bar(15);
+  const a=loadBacktest().then(()=>{st('s1','ok');st('s2','run');bar(55)});
+  const b=loadFlags().then(()=>{st('s1','ok');st('s2','ok');st('s3','run');bar(85)});
+  await Promise.all([a,b]);st('s3','ok');bar(100);msg('Ready');
+  await Promise.race([new Promise(r=>setTimeout(r,Math.max(SEEN?0:500,MINBOOT-(Date.now()-t0)))),new Promise(r=>$('#boot').addEventListener('click',r,{once:true}))]);
+  clearTimeout(fs);hide();
+}
+boot();
+</script>
+</body>
+</html>

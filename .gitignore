@@ -1,0 +1,18 @@
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Python environments
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+data/creditcard.csv

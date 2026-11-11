@@ -1,0 +1,120 @@
+# GhostRing
+
+Fraud triage for small PayPal sellers. GhostRing ranks incoming payments from as few as five confirmed frauds, attaches the closest confirmed cases to each flag as evidence, and refunds through PayPal only after code and a person have both signed off.
+
+Built for the PayPal AI Hackathon. The live demo and demo video are linked in the submission. [Setup](SETUP.md) · MIT licensed
+
+## At a glance
+
+A small seller holds a handful of confirmed frauds, not the thousands of labelled cases a conventional classifier needs, and a bare risk score gives them nothing to act on or defend. GhostRing starts from the cases the seller already trusts. On the public ULB credit-card benchmark it reaches 0.81 to 0.83 PR-AUC from five to 25 confirmed frauds, with no training step. That is within about two points of a Random Forest, which is slightly more accurate and much faster (see [Results](#results)). Gemini drafts the explanation and proposes an action; plain code verifies the text and decides; a person confirms; PayPal confirms that the payment is refundable. On the bundled demo sample, 10 of its top 10 flags were real fraud, scored against labels the system never saw (a small sample; the benchmark above is the main accuracy evidence).
+
+## PayPal at a glance
+
+- **PayPal holds the payments.** The demo payments are real PayPal sandbox orders, created and captured through the Orders API.
+- **PayPal confirms before money moves.** The app reads the capture back and blocks the refund if PayPal reports any status other than `COMPLETED`, or a different amount.
+- **PayPal issues the refund.** The app calls the refund endpoint under an idempotency key, so a repeated click cannot refund twice.
+- **You can see it in the app.** Each linked payment shows a *PayPal record* box, the refund ID, a "Refunded via PayPal" total and a PayPal flow card.
+- **Sandbox only.** Every call targets the PayPal sandbox with test money.
+
+## Testing it (for judges)
+
+Every route is free and needs no login.
+
+1. **Hosted demo.** Open the live demo linked in the submission. Rows tagged *PayPal payment linked* are real sandbox payments, each refundable once.
+2. **Run it with no keys.** Run `pip install -r requirements.txt` and `cp .env.example .env`, set `LLM_MODE=mock`, then run `python -m uvicorn app:app --reload`. You get the scoring, evidence, verifier and review queue on the bundled sample. Sending a refund needs PayPal sandbox credentials (route 3).
+3. **Run it with live PayPal refunds.** Follow [SETUP.md](SETUP.md). Any test credentials a judge needs are supplied in the Devpost testing instructions, never in this repository.
+
+## Try it
+
+Open the live demo; the first request can take up to a minute while the free instance wakes. The review queue lists the fifteen highest-risk payments. Rows tagged *PayPal payment linked* are backed by real sandbox payments and can be refunded. The rest carry a recommendation only.
+
+Open a linked row with **Explain**. You get the evidence, the AI's explanation, the verifier's verdict, and a *PayPal record* showing the payment's status and amount. If the verified decision is a refund, confirm it to send a sandbox refund. A payment can be fully refunded once, and the page shows how many remain. All money is sandbox test money. If no backend answers and the page is opened as a local file or with `?demo` in the address, it falls back to a clearly labelled demo mode with simulated data and no PayPal calls. The live site always uses the real backend.
+
+## PayPal integration
+
+**The flow:** customer pays → payment captured in PayPal → GhostRing scores and explains → a person confirms → PayPal verifies the capture → PayPal issues the refund.
+
+PayPal is where a flag becomes money back, and it is the system of record before any money moves. Every call targets the sandbox, and the client refuses to start against any other host.
+
+| PayPal REST call | Used by | Purpose |
+|---|---|---|
+| `POST /v1/oauth2/token` | app, seeding script | Authenticate |
+| `GET /v2/payments/captures/{id}` | app | Verify status and amount before a refund; at startup, learn which payments PayPal already shows as refunded |
+| `POST /v2/payments/captures/{id}/refund` | app | Issue the refund under a `PayPal-Request-Id` idempotency key |
+| `POST /v2/checkout/orders` | seeding script | Create the demo payments |
+| `GET /v2/checkout/orders/{id}` | seeding script | Confirm the buyer has approved an order |
+| `POST /v2/checkout/orders/{id}/capture` | seeding script | Capture approved orders so they can be refunded |
+
+We call the REST API directly rather than through the Agent Toolkit or MCP server, which keeps the step that moves money deterministic and auditable. Demo payments are created and captured with `seed_sandbox.py`. PayPal requires a buyer to approve each order, so that step is manual.
+
+## How it works
+
+**Score.** Graph Ghost is semi-supervised label propagation (label spreading; Zhou et al., 2004) on a k-nearest-neighbour similarity graph of payments (k = 10, cosine distance). The seller's confirmed frauds and known-good payments seed the graph, their labels diffuse along similarity edges, and each unlabelled payment inherits a score from its neighbourhood. Nothing is trained. The output is a risk index from 0 to 100 that ranks new payments against one another.
+
+**Evidence.** Each flag lists the three most similar confirmed frauds, by cosine similarity, with their amounts and similarity scores, so the seller can see what the ranking rests on.
+
+**Explain.** Gemini receives only the facts the scorer produced and returns a short explanation with a proposed action: `refund`, `review` or `approve`. The merchant policy is explicit. Refund only when the risk index is at least 60 and the nearest confirmed fraud has a similarity of at least 0.70.
+
+**Verify.** Model output is untrusted input. The explanation is accepted only if every number and transaction ID in it appears in the scorer's facts; otherwise a template replaces it. Code, not the model, then fixes the action, downgrading a proposed refund to `review` unless both thresholds hold. The check fails closed: with no similarity evidence, there is no refund.
+
+**Refund.** After a person confirms, the app reads the capture back from PayPal and blocks the refund if PayPal reports any status other than `COMPLETED`, or a different amount. If that lookup itself fails, PayPal still validates the refund request. It then issues the refund under an idempotency key, so a repeated click cannot refund twice.
+
+## Results
+
+Given 5, 10 or 25 confirmed frauds and 300 known-good payments, Graph Ghost reaches 0.81 to 0.83 PR-AUC on the public ULB credit-card dataset.
+
+*Protocol.* 30,492 transactions: all 492 frauds plus 30,000 legitimate ones. Each method sees only the stated labels and is scored on the transactions it was not given. PR-AUC is the area under the precision-recall curve (1.0 is perfect). Figures are mean ± standard deviation over five seeds. Reproduce with `python evaluate.py --csv data/creditcard.csv`; the raw output is in `results.json`.
+
+| Known frauds | Graph Ghost | Logistic Regression | Random Forest |
+|---|---|---|---|
+| 5 | 0.811 ± 0.019 | 0.734 ± 0.206 | 0.832 ± 0.015 |
+| 10 | 0.820 ± 0.023 | 0.744 ± 0.065 | 0.842 ± 0.012 |
+| 25 | 0.827 ± 0.026 | 0.792 ± 0.030 | 0.853 ± 0.014 |
+
+Graph Ghost trails Random Forest by roughly two points at every label budget and is the slower method (20 to 40 seconds against 1 to 2 on 30,000 rows). It is markedly more stable than logistic regression when labels are scarce (a standard deviation of 0.019 against 0.206 at five labels). We claim comparable accuracy without training, not superiority. The contribution is per-flag evidence and a verified path to a refund.
+
+Two caveats apply. The sample is enriched: about 1.6% fraud, against roughly 0.17% in the source data, which flatters PR-AUC relative to production. And the method is transductive, scoring a batch with the unlabelled payments inside the graph, whereas the baselines are inductive and see only their labels.
+
+On the sample bundled with the repository (4% fraud), 10 of the top 10 flags and 19 of the top 20 were fraudulent, measured against labels the system never saw. It is a single small sample, so treat the table as the accuracy evidence.
+
+## Safety design
+
+The model proposes; code decides. Invented numbers or identifiers are rejected, and a template explanation covers any model failure. A refund requires the code's approval, PayPal's confirmation that the payment is refundable, and a person's click. The risk index is a ranking signal, not proof of fraud, and the interface says so.
+
+`python test_verifier.py` runs four tests: text that uses only known numbers is accepted; text with an invented amount and transaction ID is rejected; a refund is downgraded to `review` unless both thresholds hold; an invalid action is replaced.
+
+## Limits
+
+- **No ring detection.** The public data is anonymised, with no accounts, devices or emails, so the graph links transactions by feature similarity and GhostRing makes no fraud-ring claim.
+- **Relative risk index.** It is scaled so the top-ranked payment in a batch is always 100. It ranks payments against one another and is not an absolute probability, which is why the refund rule also demands a close confirmed-fraud match.
+- **Narrow verification.** The verifier checks numbers and transaction IDs, not qualitative statements.
+- **Open demo.** There is no login, so anyone can use the refund button on the few sandbox payments, once each.
+- **Single dataset.** Results come from one public dataset and have not been tested on a real merchant.
+
+## Built during the hackathon
+
+This section explains how the project was significantly updated during the Submission Period (1 October to 12 November 2026).
+
+Before the hackathon there was a research prototype of kNN-graph label propagation, tested on small textbook datasets (Iris and Wine). Everything specific to this project was built for the event: fraud scoring and evidence at scale, the baseline comparison, the Gemini explainer and its merchant policy, the verifier and its tests, the PayPal sandbox integration, the web app and the deployment setup.
+
+## Tools
+
+Gemini API: writes the explanation and proposes the action (model set by `GEMINI_MODEL`; built and tested with `gemini-3.5-flash-lite`). PayPal REST API (sandbox): payments, status checks and refunds. Graph Ghost: our own method, implemented with scikit-learn and SciPy. Backend: FastAPI. Front end: plain HTML and JavaScript. Hosting: Render (one of the hackathon's sponsor tools). Fonts: Dela Gothic One and Zen Kaku Gothic New, loaded from Google Fonts (SIL Open Font License).
+
+## Run it yourself
+
+```
+pip install -r requirements.txt
+cp .env.example .env
+python -m uvicorn app:app --reload
+```
+
+With `LLM_MODE=mock` the app runs without API keys, using template explanations. Live refunds need PayPal sandbox credentials and seeded payments. The demo sample ships in `data/demo_tx.csv`. To rebuild it or reproduce the benchmark, download `creditcard.csv` (Kaggle: mlg-ulb/creditcardfraud) into `data/`. [SETUP.md](SETUP.md) has the full steps, settings and a troubleshooting table.
+
+## Next
+
+The seller currently supplies confirmed frauds by hand. The next step is to ingest them from PayPal's Disputes API and webhooks, so each newly confirmed fraud sharpens the next round of flags. Not built.
+
+## License and data
+
+Code: MIT (see the LICENSE file in the repository root). The demo data is a sample of the Credit Card Fraud Detection dataset from the ULB Machine Learning Group (Kaggle: mlg-ulb/creditcardfraud), which keeps its own license; see its Kaggle page. Credit: Andrea Dal Pozzolo, Olivier Caelen, Reid A. Johnson and Gianluca Bontempi, "Calibrating Probability with Undersampling for Unbalanced Classification", IEEE CIDM, 2015.

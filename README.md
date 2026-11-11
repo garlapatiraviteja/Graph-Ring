@@ -4,9 +4,9 @@
 
 GhostRing helps small PayPal sellers find fraudulent payments using as few as five confirmed fraud cases. It ranks incoming payments, shows the closest confirmed frauds as evidence for every flag, and sends a refund through PayPal only after both code and a person have approved it.
 
-**[▶ Live demo](LIVE_DEMO_URL)** · **[Demo video](DEMO_VIDEO_URL)** · [Setup](SETUP.md) · MIT licensed
+**[▶ Demo video](DEMO_VIDEO_URL)** · [Setup](SETUP.md) · MIT licensed
 
-
+Built for the PayPal AI Hackathon.
 
 ## The problem
 
@@ -35,17 +35,17 @@ PayPal is the system of record at every point where money is involved.
 
 Every route is free and needs no login.
 
-1. **Hosted demo.** Open the live demo linked in the submission. Scoring, evidence, the Gemini explanation, the verifier verdict and the PayPal record work on every flagged row. The four linked sandbox payments were refunded during development (see [Verified PayPal sandbox results](#verified-paypal-sandbox-results)), so the live page shows them as *Refunded* and no refund button is left to click. To run a live refund yourself, seed fresh payments with [SETUP.md](SETUP.md).
+1. **Demo video.** Watch the demo video linked at the top of this page. The four linked sandbox payments were refunded during development (see [Verified PayPal sandbox results](#verified-paypal-sandbox-results)), so the app shows them as *Refunded* and no refund button is left to click. To run a live refund yourself, seed fresh payments with [SETUP.md](SETUP.md).
 2. **Run it with no keys.** Run `pip install -r requirements.txt` and `cp .env.example .env`, set `LLM_MODE=mock`, then start the app with `python -m uvicorn app:app --reload`. You get the scoring, evidence, verifier and review queue on the bundled sample. Sending a refund needs PayPal sandbox credentials (route 3).
 3. **Run it with live PayPal refunds.** Follow [SETUP.md](SETUP.md). Any test credentials a judge needs are supplied in the Devpost testing instructions and never appear in this repository.
 
 ## Try it
 
-Open the live demo. The first request can take up to a minute while the free instance wakes up. The review queue lists the fifteen highest-risk payments. Rows tagged *PayPal payment linked* are backed by real sandbox payments, and in the hosted demo they have already been refunded and show as *Refunded*. The rest carry a recommendation only.
+Start the app (see [Run it yourself](#run-it-yourself)) and open it in your browser. The review queue lists the fifteen highest-risk payments. Rows tagged *PayPal payment linked* are backed by real sandbox payments, and the four seeded during development have already been refunded and show as *Refunded*. The rest carry a recommendation only.
 
 Open a linked row with **Explain** and you will see the evidence, the AI's explanation, the verifier's verdict, and a *PayPal record* showing the payment's status and amount. If the verified decision is a refund and a PayPal payment is attached, confirm it to send a sandbox refund. Rows with no attached payment show a *Review only* note under the recommended action: the policy would refund them, but there is nothing in PayPal to refund. A payment can be fully refunded once, and the page shows how many remain. All money is sandbox test money.
 
-If no backend answers, or the page is opened as a local file, it falls back to a clearly labelled demo mode with simulated data and no PayPal calls. The live site always uses the real backend.
+If no backend answers, or the page is opened as a local file or with `?demo` added to the address, it falls back to a clearly labelled demo mode with simulated data and no PayPal calls. When the backend is running, the page always uses it.
 
 ## PayPal integration
 
@@ -73,7 +73,7 @@ Four demo payments were created, approved by a sandbox buyer, captured and then 
 | TX-0081 | $83.38 | `02C52963EP228835C` | `8BK82312SS343845M` | COMPLETED |
 | TX-0700 | $238.90 | `3LV68253J93115320` | `0N516169PF7820533` | COMPLETED |
 
-![Review queue in the hosted app: TX-0135, TX-0485, TX-0081 and TX-0700 are tagged "PayPal payment linked" and "Refunded"; other rows are "Review only".](review-queue.png)
+![Review queue in the app: TX-0135, TX-0485, TX-0081 and TX-0700 are tagged "PayPal payment linked" and "Refunded"; other rows are "Review only".](review-queue.png)
 
 *The review queue after the four refunds: each linked payment shows as Refunded, and rows with no PayPal payment attached are Review only.*
 
@@ -127,7 +127,7 @@ The model proposes and code decides. Invented numbers or identifiers are rejecte
 - **No ring detection.** The public data is anonymised, with no accounts, devices or emails, so the graph links transactions by feature similarity and GhostRing makes no fraud-ring claim.
 - **Relative risk index.** The index is scaled so the top-ranked payment in a batch is always 100. It ranks payments against one another and is not an absolute probability, which is why the refund rule also demands a close confirmed-fraud match.
 - **Narrow verification.** The verifier checks numbers and transaction IDs, not qualitative statements.
-- **Spent demo payments.** There is no login, and each sandbox payment can be fully refunded only once. The hosted demo's linked payments have all been used, so it shows them as refunded. Fresh payments can be seeded with `seed_sandbox.py` (see [SETUP.md](SETUP.md)).
+- **Spent demo payments.** There is no login, and each sandbox payment can be fully refunded only once. The linked payments seeded during development have all been used, so the app shows them as refunded. Fresh payments can be seeded with `seed_sandbox.py` (see [SETUP.md](SETUP.md)).
 - **Single dataset.** Results come from one public dataset and have not been tested on a real merchant.
 
 ## Built during the hackathon
@@ -143,7 +143,7 @@ Before the hackathon, there was only a research prototype of kNN-graph label pro
 - **Graph Ghost:** our own method, implemented with scikit-learn and SciPy.
 - **Backend:** FastAPI.
 - **Front end:** plain HTML and JavaScript.
-- **Hosting:** Render, one of the hackathon's sponsor tools.
+- **Deployment:** a `render.yaml` is included for Render.
 - **Fonts:** Dela Gothic One and Zen Kaku Gothic New, loaded from Google Fonts (SIL Open Font License).
 
 ## Run it yourself

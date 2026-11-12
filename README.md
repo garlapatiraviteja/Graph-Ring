@@ -16,6 +16,8 @@ Fraud tools are built for companies with thousands of labelled cases. A small se
 
 GhostRing starts from the cases the seller already trusts. Each new payment is compared with the confirmed frauds and known-good payments the seller has, and every flag comes with the closest confirmed cases as proof. There is no training step.
 
+**Graph Ghost** is the scoring method at the core of GhostRing. Picture every payment as a dot, with lines joining payments that look alike. The seller's few confirmed frauds are marked, and that fraud signal spreads along the lines to nearby payments, like ink through paper, while known-good payments spread the opposite signal. Payments that end up carrying a lot of fraud signal rank highest. Nothing is trained, and every flag can point to the confirmed frauds it sits closest to.
+
 On the public ULB credit-card benchmark, it reaches 0.81 to 0.83 PR-AUC from five to 25 confirmed frauds. That is within about two points of a Random Forest, which is slightly more accurate and much faster (see [Results](#results)). On the bundled demo sample, 10 of the top 10 flags were real fraud, scored against labels the system never saw. That sample is small, so the benchmark remains the main evidence of accuracy.
 
 Responsibility is split deliberately. Gemini drafts the explanation and proposes an action. Plain code verifies the text and makes the decision. A person confirms. PayPal confirms that the payment is refundable. No single step can move money alone.
@@ -36,10 +38,9 @@ PayPal is the system of record at every point where money is involved.
 Every route is free and needs no login.
 
 1. **Demo video.** Watch the demo video linked at the top of this page. The four linked sandbox payments were refunded during development (see [Verified PayPal sandbox results](#verified-paypal-sandbox-results)), so the app shows them as *Refunded* and no refund button is left to click. To run a live refund yourself, seed fresh payments with [SETUP.md](SETUP.md).
-2. **Presentation.** Read the presentation linked at the top of this page for an overview of the project.
-3. **Website preview.** Open the [website preview](https://garlapatiraviteja.github.io/Graph-Ring/?demo) to see the interface in your browser. GitHub Pages serves only the front end, so there is no backend behind it and the page shows clearly labelled simulated data, with no PayPal calls. Run the server (routes 4 and 5) to see real scoring and PayPal refunds.
-4. **Run it with no keys.** Run `pip install -r requirements.txt` and `cp .env.example .env`, set `LLM_MODE=mock`, then start the app with `python -m uvicorn app:app --reload`. You get the scoring, evidence, verifier and review queue on the bundled sample. Sending a refund needs PayPal sandbox credentials (route 5).
-5. **Run it with live PayPal refunds.** Follow [SETUP.md](SETUP.md). Any test credentials a judge needs are supplied in the Devpost testing instructions and never appear in this repository.
+2. **Website preview.** Open the [website preview](https://garlapatiraviteja.github.io/Graph-Ring/?demo) to see the interface in your browser. GitHub Pages serves only the front end, so there is no backend behind it and the page shows clearly labelled simulated data, with no PayPal calls. Run the server (routes 3 and 4) to see real scoring and PayPal refunds.
+3. **Run it with no keys.** Run `pip install -r requirements.txt` and `cp .env.example .env`, set `LLM_MODE=mock`, then start the app with `python -m uvicorn app:app --reload`. You get the scoring, evidence, verifier and review queue on the bundled sample. Sending a refund needs PayPal sandbox credentials (route 4).
+4. **Run it with live PayPal refunds.** Follow [SETUP.md](SETUP.md). Any test credentials a judge needs are supplied in the Devpost testing instructions and never appear in this repository.
 
 ## Try it
 
@@ -85,7 +86,7 @@ We call the REST API directly instead of going through the Agent Toolkit or MCP 
 
 ## How it works
 
-**Score.** Graph Ghost is semi-supervised label propagation (label spreading; Zhou et al., 2004) on a k-nearest-neighbour similarity graph of payments (k = 10, cosine distance). The seller's confirmed frauds and known-good payments seed the graph. Their labels spread along similarity edges, and each unlabelled payment inherits a score from its neighbourhood. Nothing is trained. The output is a risk index from 0 to 100 that ranks new payments against one another.
+**Score.** Graph Ghost is semi-supervised label propagation (label spreading; Zhou et al., 2004) on a k-nearest-neighbour similarity graph of payments (k = 10, cosine distance). The seller's confirmed frauds and known-good payments seed the graph. Their labels spread along similarity edges, and each unlabelled payment inherits a score from its neighbourhood. Scores are balanced between the two classes so the rare fraud signal is not drowned out by the many legitimate payments. Nothing is trained. The output is a risk index from 0 to 100 that ranks new payments against one another.
 
 **Evidence.** Each flag lists the three most similar confirmed frauds, ranked by cosine similarity, with their amounts and similarity scores. The seller can see exactly what the ranking rests on.
 
@@ -129,6 +130,8 @@ The model proposes and code decides. Invented numbers or identifiers are rejecte
 - **No ring detection.** The public data is anonymised, with no accounts, devices or emails, so the graph links transactions by feature similarity and GhostRing makes no fraud-ring claim.
 - **Relative risk index.** The index is scaled so the top-ranked payment in a batch is always 100. It ranks payments against one another and is not an absolute probability, which is why the refund rule also demands a close confirmed-fraud match.
 - **Narrow verification.** The verifier checks numbers and transaction IDs, not qualitative statements.
+- **Single dataset.** Results come from one public dataset and have not been tested on a real merchant.
+- **Spent demo payments.** Each sandbox payment can be fully refunded only once, and the four demo payments have been used. Fresh ones can be seeded with `seed_sandbox.py` (see [SETUP.md](SETUP.md)).
 
 ## Built during the hackathon
 
@@ -160,4 +163,6 @@ With `LLM_MODE=mock`, the app runs without API keys and uses template explanatio
 
 Today the seller supplies confirmed frauds by hand. The next step is to ingest them from PayPal's Disputes API and webhooks, so that each newly confirmed fraud sharpens the next round of flags. This is not yet built.
 
+## License and data
 
+Code: MIT (see the LICENSE file in the repository root). The demo data is a sample of the Credit Card Fraud Detection dataset from the ULB Machine Learning Group (Kaggle: mlg-ulb/creditcardfraud), which keeps its own license; see its Kaggle page. Credit: Andrea Dal Pozzolo, Olivier Caelen, Reid A. Johnson and Gianluca Bontempi, "Calibrating Probability with Undersampling for Unbalanced Classification", IEEE CIDM, 2015.

@@ -4,7 +4,7 @@
 
 GhostRing helps small PayPal sellers find fraudulent payments using as few as five confirmed fraud cases. It ranks incoming payments, shows the closest confirmed frauds as evidence for every flag, and sends a refund through PayPal only after both code and a person have approved it.
 
-**[▶ Demo video](https://youtu.be/QHTEb2wSd9g)**  · **[Website preview](https://garlapatiraviteja.github.io/Graph-Ring/?demo)** · [Setup](SETUP.md) · MIT licensed
+**[▶ Demo video](https://www.youtube.com/watch?v=xzbtp27wsbg)**  · **[Website preview](https://garlapatiraviteja.github.io/Graph-Ring/?demo)** · [Setup](SETUP.md) · MIT licensed
 
 Built for the PayPal AI Hackathon.
 

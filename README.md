@@ -65,7 +65,7 @@ This is the step where a flag becomes money back, so it is built to be strict. P
 | `GET /v2/checkout/orders/{id}` | seeding script | Confirm the buyer has approved an order |
 | `POST /v2/checkout/orders/{id}/capture` | seeding script | Capture approved orders so they can be refunded |
 
-### Verified PayPal sandbox results
+### Verified PayPal sandbox results (sample)
 
 Four demo payments were created, approved by a sandbox buyer, captured and then refunded through the app. For each one, PayPal's own record of the capture now reads `REFUNDED`, and the app holds a matching refund receipt. All amounts are USD test money.
 

@@ -540,9 +540,9 @@ footer.foot .credit{font:600 12px var(--font);color:var(--mute)}
     <aside>
       <section class="panel" id="perf"><div class="panel-h"><h2>Detection performance</h2></div><div class="body" id="backtest"><span class="small">Loading…</span></div></section>
       <section class="panel" id="bench"><div class="panel-h"><h2>Benchmark (5 seeds)</h2></div><div class="body">
-        <table class="tbl"><tr><th>Labelled frauds</th><th>Ghost</th><th>Logistic</th><th>Forest</th></tr>
+        <table class="tbl"><tr><th>Labelled frauds</th><th>Ring</th><th>Logistic</th><th>Forest</th></tr>
         <tr><td>5</td><td>0.81</td><td>0.73</td><td>0.83</td></tr><tr><td>10</td><td>0.82</td><td>0.74</td><td>0.84</td></tr><tr><td>25</td><td>0.83</td><td>0.79</td><td>0.85</td></tr></table>
-        <div class="small" style="margin-top:10px">PR-AUC on the public ULB dataset (<code>evaluate.py</code>, mean of five seeds). Graph Ghost needs no training and is steadier than logistic regression; Random Forest is slightly more accurate.</div>
+        <div class="small" style="margin-top:10px">PR-AUC on the public ULB dataset (<code>evaluate.py</code>, mean of five seeds). Graph Ring needs no training and is steadier than logistic regression; Random Forest is slightly more accurate.</div>
       </div></section>
       <section class="panel" id="policy"><div class="panel-h"><h2>How a refund happens</h2></div><div class="body">
         <div class="rule"><i>1</i><div>The model explains and proposes; code decides. A refund requires a risk index of <b><span id="thr">60</span> or higher</b> and a nearest confirmed fraud with similarity of at least <b><span id="thrs">0.70</span></b>.</div></div>
@@ -552,9 +552,9 @@ footer.foot .credit{font:600 12px var(--font);color:var(--mute)}
       <section class="panel"><div class="panel-h"><h2>Recent refunds</h2></div><div class="body"><div class="act" id="activity"></div></div></section>
     </aside>
   </div>
-  <section class="panel gg" id="ghost" aria-label="Graph Ghost">
+  <section class="panel gg" id="ghost" aria-label="Graph Ring">
     <div>
-      <h2>Graph Ghost</h2>
+      <h2>Graph Ring</h2>
       <p>Each payment is linked to the payments most similar to it. Your few confirmed frauds pass their label along those links, so unlabelled "ghost" payments acquire a risk score. Nothing is trained. The evidence for each flag is the confirmed fraud it most resembles.</p>
       <ul class="gg-l"><li><i style="--k:var(--red)"></i>Confirmed fraud</li><li><i style="--k:var(--green)"></i>Known-good payment</li><li><i class="ghost"></i>Unlabelled payment, scored by its neighbours</li></ul>
       <div class="gg-btns"><button id="replay" class="pri">Replay</button><button id="reshuffle">New example</button></div>
@@ -569,7 +569,7 @@ footer.foot .credit{font:600 12px var(--font);color:var(--mute)}
   <h2>From flag to refund in four steps</h2>
   <p class="sub">Every step is visible in the app, so you can see why a payment was flagged before any money moves.</p>
   <div class="cols">
-    <div class="card"><div class="n">1</div><h3>Score</h3><p>Graph Ghost links each payment to its nearest neighbours and propagates risk from your confirmed frauds along those links.</p></div>
+    <div class="card"><div class="n">1</div><h3>Score</h3><p>Graph Ring links each payment to its nearest neighbours and propagates risk from your confirmed frauds along those links.</p></div>
     <div class="card"><div class="n">2</div><h3>Explain</h3><p>A language model drafts a short explanation and proposes refund, review or approve, using only facts the scorer produced.</p></div>
     <div class="card"><div class="n">3</div><h3>Verify</h3><p>Code rejects any number or ID the scorer did not produce, then enforces the refund policy. The model cannot override it.</p></div>
     <div class="card"><div class="n">4</div><h3>Refund</h3><span class="ppchip" style="margin:0 0 8px">PayPal REST API</span><p>You confirm; GhostRing checks the capture with PayPal and issues the refund. A captured payment can be fully refunded only once.</p></div>
@@ -721,7 +721,7 @@ function paint(id,p){
   const ev=p.facts.similar_confirmed_frauds.map(n=>{const s=Math.max(0,Math.min(1,Number(n.similarity)));
     return `<tr><td>${esc(n.tx_id)}</td><td>${money(n.amount)}</td><td><span class="sim"><span class="meter"><i style="width:${(s*100).toFixed(0)}%"></i></span>${esc(n.similarity)}</span></td></tr>`}).join('');
   const pc=p.paypal_capture,canRefund=p.final_action==='refund'&&p.paypal_linked&&!p.refunded&&(!pc||pc.status==='COMPLETED');
-  const steps=[['Ghost score','done'],['Evidence','done'],[p.llm_error?'Template used':'Model explained',p.llm_error?'warn done':'done'],[v.passed?'Code verified':'Text replaced',v.passed?'done':'warn done'],['You confirm',p.refunded?'done':canRefund?'next':''],['PayPal refund',p.refunded?'done':'']];
+  const steps=[['Ring score','done'],['Evidence','done'],[p.llm_error?'Template used':'Model explained',p.llm_error?'warn done':'done'],[v.passed?'Code verified':'Text replaced',v.passed?'done':'warn done'],['You confirm',p.refunded?'done':canRefund?'next':''],['PayPal refund',p.refunded?'done':'']];
   $('#d-body').innerHTML=`
     <div class="sec"><h4>From flag to refund</h4><ol class="pipe">${steps.map(s=>`<li class="${s[1]}">${s[0]}</li>`).join('')}</ol></div>
     <div class="sec"><h4>Risk index</h4><div class="score ${c}"><span class="big">${r}</span><span class="meter"><i style="width:${Math.min(100,r)}%"></i></span><span class="chip ${cc}">${l}</span></div></div>
